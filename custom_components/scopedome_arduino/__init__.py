@@ -13,7 +13,7 @@ from .api import CardAuthError, CardConnectionError, ScopeDomeClient
 from .const import CONF_PASSWORD, CONF_PORT, DOMAIN, SCAN_INTERVAL
 from .protocol import DomeStatus, ProtocolError
 
-PLATFORMS = ["binary_sensor", "button", "cover", "sensor"]
+PLATFORMS = ["binary_sensor", "button", "cover", "number", "sensor"]
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -24,6 +24,9 @@ class ScopeDomeCoordinator(DataUpdateCoordinator[DomeStatus]):
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
         self.client = client
         self.movement_lock = asyncio.Lock()
+        self.rotation_angle = 0.0
+        self.dome_stop_generation = 0
+        self.dome_rotation_task = None
 
     async def _async_update_data(self) -> DomeStatus:
         try:

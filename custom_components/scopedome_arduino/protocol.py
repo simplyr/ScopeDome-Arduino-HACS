@@ -48,6 +48,16 @@ def azimuth_dms(azimuth: float) -> str:
     return f"{degrees}°{minutes:02d}′{seconds:02d}″"
 
 
+def rotation_pulses(degrees: float, span: int | None) -> int | None:
+    """Convert a bounded angle to a representable, bounded encoder step."""
+    if (span is None or not isinstance(degrees, (int, float))
+            or isinstance(degrees, bool) or not isfinite(degrees)
+            or not 0 < degrees <= 10):
+        return None
+    pulses = min(round(degrees * span / 360), span // 36)
+    return pulses if 1 <= pulses <= 5000 else None
+
+
 def response_payload(command: str, body: str) -> str:
     """Read a command response, with or without its serial-style prefix."""
     value = body.strip()
@@ -242,7 +252,7 @@ class DomeStatus:
             return False
         return True
 
-    def validate_dome_command(self, direction: str) -> bool:
+    def validate_dome_command(self, direction: str, *, allow_stop=False) -> bool:
         """Allow only a new, safe rotation direction from a fresh status."""
         if direction not in ("CW", "CCW"):
             raise MovementBlocked("Unknown dome direction")
@@ -255,9 +265,9 @@ class DomeStatus:
         if self.dome_motion == "fault":
             raise MovementBlocked("Both dome motor relays are active")
         requested = "clockwise" if direction == "CW" else "counterclockwise"
-        if self.dome_motion == requested:
+        if self.dome_motion == requested and not allow_stop:
             return False
-        if self.dome_motion != "stopped":
+        if self.dome_motion != "stopped" and not allow_stop:
             raise MovementBlocked("Stop dome rotation before changing direction")
         return True
 

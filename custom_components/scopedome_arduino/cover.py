@@ -31,7 +31,7 @@ async def async_move_shutter(coordinator, direction: str, active_level: int | No
 class ScopeDomeShutter(ScopeDomeEntity, CoverEntity):
     """The paired Slave card's shutter."""
 
-    _attr_name = "Shutter combined control"
+    _attr_name = "Shutter control"
     _attr_icon = "mdi:window-shutter"
 
     def __init__(self, entry, coordinator) -> None:

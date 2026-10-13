@@ -28,7 +28,6 @@ from .const import (
     CONF_PARK_AZIMUTH,
     CONF_PASSWORD,
     CONF_PORT,
-    CONF_ROTATION_STEP,
     CONF_SENSOR_ACTIVE_LEVEL,
     DOMAIN,
     UNKNOWN_LEVEL,
@@ -153,11 +152,6 @@ class ScopeDomeOptionsFlow(config_entries.OptionsFlow):
                     CONF_HOME_ACTIVE_LEVEL, UNKNOWN_LEVEL
                 )):
                     vol.In([UNKNOWN_LEVEL, "0", "1"]),
-                vol.Required(CONF_ROTATION_STEP, default=options.get(
-                    CONF_ROTATION_STEP, 0
-                )): NumberSelector(NumberSelectorConfig(
-                    min=0, max=5000, step=1, mode=NumberSelectorMode.BOX
-                )),
             }),
         )
 
