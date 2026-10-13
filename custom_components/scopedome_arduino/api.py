@@ -58,10 +58,13 @@ class ScopeDomeClient:
         return parse_status(await self._request("getStatus"))
 
     async def command(self, name: str) -> None:
-        """Send only a fixed, documented movement or stop command."""
+        """Send only documented movements with bounded dome rotation."""
         if name not in {
             "moveShutter=OPEN", "moveShutter=CLOSE", "stopShutter", "stopDome"
-        }:
+        } and not (
+            (match := re.fullmatch(r"moveDome=(CW|CCW):([1-9][0-9]{0,3})", name))
+            and int(match.group(2)) <= 5000
+        ):
             raise ValueError("Unsupported card command")
         answer = (await self._request(name)).strip()
         if not (answer == "OK" or answer == f"{name}|OK" or answer.startswith(f"{name}|OK|")):

@@ -18,7 +18,21 @@ from homeassistant.helpers.selector import (
 )
 
 from .api import CardAuthError, CardConnectionError, ScopeDomeClient
-from .const import CONF_PASSWORD, CONF_PORT, CONF_SENSOR_ACTIVE_LEVEL, DOMAIN, UNKNOWN_LEVEL
+from .const import (
+    CONF_CLOUD_INDEX_THRESHOLD,
+    CONF_ENCODER_COUNTS_PER_TURN,
+    CONF_ENCODER_DIRECTION,
+    CONF_HOME_ACTIVE_LEVEL,
+    CONF_HOME_AZIMUTH,
+    CONF_HOME_ENCODER_COUNT,
+    CONF_PARK_AZIMUTH,
+    CONF_PASSWORD,
+    CONF_PORT,
+    CONF_ROTATION_STEP,
+    CONF_SENSOR_ACTIVE_LEVEL,
+    DOMAIN,
+    UNKNOWN_LEVEL,
+)
 from .protocol import ProtocolError
 
 
@@ -120,16 +134,55 @@ class ScopeDomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class ScopeDomeOptionsFlow(config_entries.OptionsFlow):
-    """Require a verified physical signal level before enabling movement."""
+    """Require verified contacts and a bounded step before movement."""
 
     async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
-        current = self.config_entry.options.get(CONF_SENSOR_ACTIVE_LEVEL, UNKNOWN_LEVEL)
+            self._basic_options = user_input
+            return await self.async_step_azimuth()
+        options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema({
-                vol.Required(CONF_SENSOR_ACTIVE_LEVEL, default=current):
+                vol.Required(CONF_SENSOR_ACTIVE_LEVEL, default=options.get(
+                    CONF_SENSOR_ACTIVE_LEVEL, UNKNOWN_LEVEL
+                )):
                     vol.In([UNKNOWN_LEVEL, "0", "1"]),
+                vol.Required(CONF_HOME_ACTIVE_LEVEL, default=options.get(
+                    CONF_HOME_ACTIVE_LEVEL, UNKNOWN_LEVEL
+                )):
+                    vol.In([UNKNOWN_LEVEL, "0", "1"]),
+                vol.Required(CONF_ROTATION_STEP, default=options.get(
+                    CONF_ROTATION_STEP, 0
+                )): NumberSelector(NumberSelectorConfig(
+                    min=0, max=5000, step=1, mode=NumberSelectorMode.BOX
+                )),
+            }),
+        )
+
+    async def async_step_azimuth(self, user_input: dict | None = None):
+        if user_input is not None:
+            return self.async_create_entry(data={**self._basic_options, **user_input})
+        options = self.config_entry.options
+        optional_fields = {}
+        for key, minimum, maximum, increment in (
+            (CONF_ENCODER_COUNTS_PER_TURN, 1, 1000000, 1),
+            (CONF_HOME_ENCODER_COUNT, 0, 1000000, 1),
+            (CONF_HOME_AZIMUTH, 0, 359.999999, "any"),
+            (CONF_PARK_AZIMUTH, 0, 359.999999, "any"),
+            (CONF_CLOUD_INDEX_THRESHOLD, -100, 100, "any"),
+        ):
+            marker = (vol.Optional(key, default=options[key]) if key in options
+                      else vol.Optional(key))
+            optional_fields[marker] = NumberSelector(NumberSelectorConfig(
+                min=minimum, max=maximum, step=increment, mode=NumberSelectorMode.BOX
+            ))
+        return self.async_show_form(
+            step_id="azimuth",
+            data_schema=vol.Schema({
+                **optional_fields,
+                vol.Required(CONF_ENCODER_DIRECTION, default=options.get(
+                    CONF_ENCODER_DIRECTION, UNKNOWN_LEVEL
+                )): vol.In([UNKNOWN_LEVEL, "cw", "ccw"]),
             }),
         )

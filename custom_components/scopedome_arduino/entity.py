@@ -2,7 +2,24 @@
 
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import (
+    CONF_ENCODER_COUNTS_PER_TURN,
+    CONF_ENCODER_DIRECTION,
+    CONF_HOME_AZIMUTH,
+    CONF_HOME_ENCODER_COUNT,
+    DOMAIN,
+    UNKNOWN_LEVEL,
+)
+
+
+def calibrated_azimuth(status, options) -> float | None:
+    """Return no angle until all installation-specific values are supplied."""
+    return status.azimuth(
+        options.get(CONF_ENCODER_COUNTS_PER_TURN),
+        options.get(CONF_HOME_ENCODER_COUNT),
+        options.get(CONF_HOME_AZIMUTH),
+        options.get(CONF_ENCODER_DIRECTION, UNKNOWN_LEVEL),
+    )
 
 
 class ScopeDomeEntity(CoordinatorEntity):

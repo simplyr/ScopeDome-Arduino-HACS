@@ -30,9 +30,25 @@
   "options": {
     "step": {
       "init": {
-        "title": "Shutter contact polarity",
-        "description": "Check the reported open and close input values with the manufacturer's Test App in known physical positions. Select their active value only after verifying both contacts. Unknown leaves motion controls disabled.",
-        "data": {"sensor_active_level": "Active value of shutter limit contacts (unknown, 0 or 1)"}
+        "title": "Verified contacts and rotation step",
+        "description": "Check the shutter limits and dome Home switch in the ScopeDome driver's Shutters and Sensors tabs at known physical positions. Select each active input value only after verifying it. Enter a small, tested encoder pulse step for each left/right button press; 0 disables rotation buttons. Encoder pulses per turn must also be set on the next screen.",
+        "data": {
+          "sensor_active_level": "Shutter limit active input (unknown, 0 or 1)",
+          "home_active_level": "Dome Home switch active input (unknown, 0 or 1)",
+          "rotation_step_pulses": "Dome rotation step in encoder pulses (0 disables)"
+        }
+      },
+      "azimuth": {
+        "title": "Optional azimuth and cloud calibration",
+        "description": "Copy 'Encoder value for 360' from Config → Card and 'Home Sensor Position' plus the park angle from Config → Dome. Check whether the raw encoder count rises during clockwise or counterclockwise rotation. The card's documented reset value is 32000; verify it at Home. Cloud Index is a threshold in Config → Weather. Leave uncertain fields blank.",
+        "data": {
+          "encoder_counts_per_turn": "Encoder pulses for 360° (optional)",
+          "home_azimuth": "Home azimuth in degrees (optional)",
+          "park_azimuth": "Dome park azimuth in degrees (optional)",
+          "home_encoder_count": "Raw encoder count at Home (optional)",
+          "encoder_direction": "Raw count increases during (unknown, CW or CCW)",
+          "cloud_index_threshold": "Cloud Index threshold from driver (optional)"
+        }
       }
     }
   }

@@ -72,12 +72,18 @@ class ApiTests(unittest.TestCase):
         self.assertFalse(session.calls[0][1]["allow_redirects"])
 
     def test_only_documented_movement_commands_can_be_sent(self):
-        session = FakeSession([(200, "moveShutter=OPEN|OK|")])
+        session = FakeSession([(200, "moveShutter=OPEN|OK|"),
+                               (200, "moveDome=CW:9|OK|")])
         client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
         asyncio.run(client.command("moveShutter=OPEN"))
+        asyncio.run(client.command("moveDome=CW:9"))
         with self.assertRaises(ValueError):
             asyncio.run(client.command("clearEmergencys"))
-        self.assertEqual(len(session.calls), 1)
+        for unbounded in ("moveDome=CW", "moveDome=CW:0", "moveDome=CW:5001",
+                          "moveDome=CW:9&clearEmergencys"):
+            with self.subTest(unbounded=unbounded), self.assertRaises(ValueError):
+                asyncio.run(client.command(unbounded))
+        self.assertEqual(len(session.calls), 2)
 
     def test_auth_and_rejected_command_are_errors(self):
         unauthorized = api.ScopeDomeClient(FakeSession([(401, "")]), "192.0.2.1", 80, "bad")

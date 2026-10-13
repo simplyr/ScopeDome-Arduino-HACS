@@ -5,6 +5,7 @@ Unknown or older layouts are rejected so they cannot drive physical controls.
 """
 
 from dataclasses import dataclass
+from math import isfinite
 
 
 class ProtocolError(ValueError):
@@ -12,7 +13,31 @@ class ProtocolError(ValueError):
 
 
 class MovementBlocked(ValueError):
-    """Current status does not permit a requested shutter movement."""
+    """Current status does not permit the requested movement."""
+
+
+EMERGENCY_REASONS = {
+    0: "No alarm",
+    1: "Digital input alarm",
+    2: "Analog input alarm",
+    3: "Cloud sensor alarm",
+}
+
+
+def emergency_reason(value: int) -> str:
+    """Explain the SDK emergency code without guessing the physical trigger."""
+    return EMERGENCY_REASONS.get(value, f"Unknown code {value}")
+
+
+COMPASS_DIRECTIONS = (
+    "North", "North-East", "East", "South-East",
+    "South", "South-West", "West", "North-West",
+)
+
+
+def compass_direction(azimuth: float) -> str:
+    """Name the nearest of eight compass directions for a calibrated angle."""
+    return COMPASS_DIRECTIONS[int((azimuth % 360 + 22.5) // 45) % 8]
 
 
 def response_payload(command: str, body: str) -> str:
@@ -50,6 +75,29 @@ def _integers(group: str, minimum: int) -> tuple[int, ...]:
     return values
 
 
+def _measurements(group: str, minimum: int) -> tuple[float | None, ...]:
+    """Keep absent or malformed optional instruments from breaking card status."""
+    values = []
+    for item in group.split(":"):
+        try:
+            value = float(item)
+        except ValueError:
+            value = None
+        values.append(value if value is not None and isfinite(value) else None)
+    values.extend([None] * max(0, minimum - len(values)))
+    return tuple(values)
+
+
+def temperature(value: float | None) -> float | None:
+    """Suppress impossible readings, including common disconnected-probe values."""
+    return value if value is not None and -100 <= value <= 150 else None
+
+
+def humidity(value: float | None) -> float | None:
+    """Report a physically meaningful relative humidity only."""
+    return value if value is not None and 0 <= value <= 100 else None
+
+
 @dataclass(frozen=True)
 class CardStatus:
     """Named fields needed by this integration; remaining groups stay opaque."""
@@ -58,6 +106,20 @@ class CardStatus:
     encoder: int
     relays: tuple[int, ...]
     emergency: int
+    temperatures: tuple[float | None, ...]
+    instruments: tuple[float | None, ...]
+    outputs: tuple[float | None, ...]
+    cloud_code: int | None
+
+    @property
+    def clouds(self) -> bool | None:
+        """Any positive cloud-check code is an active card cloud alert."""
+        return None if self.cloud_code is None else self.cloud_code > 0
+
+    def heater_on(self, output_index: int) -> bool | None:
+        """Read the named InBox or Motor relay without inferring its wiring."""
+        value = self.outputs[output_index]
+        return None if value not in (0, 1) else bool(value)
 
 
 @dataclass(frozen=True)
@@ -105,6 +167,31 @@ class DomeStatus:
             return "closed"
         return "between"
 
+    def at_home(self, active_level: int | None) -> bool | None:
+        """Interpret the dome Home switch only after its polarity is verified."""
+        if active_level not in (0, 1):
+            return None
+        return self.master.digital[2] == active_level
+
+    def azimuth(self, counts_per_turn: int | None, home_count: int | None,
+                home_azimuth: float | None, increasing_direction: str) -> float | None:
+        """Convert encoder pulses only with user-supplied calibration."""
+        if (not counts_per_turn or counts_per_turn <= 0 or home_count is None
+                or home_azimuth is None):
+            return None
+        if increasing_direction not in ("cw", "ccw"):
+            return None
+        sign = 1 if increasing_direction == "cw" else -1
+        return (home_azimuth + sign * (self.master.encoder - home_count)
+                * 360 / counts_per_turn) % 360
+
+    def at_park(self, azimuth: float | None, park_azimuth: float | None) -> bool | None:
+        """Report proximity to the configured parking angle, not a card flag."""
+        if azimuth is None or park_azimuth is None:
+            return None
+        difference = abs((azimuth - park_azimuth + 180) % 360 - 180)
+        return difference <= 1 and self.dome_motion == "stopped"
+
     @property
     def motion_safe(self) -> bool:
         return self.slave_online and self.master.emergency == 0 and self.slave.emergency == 0
@@ -132,6 +219,23 @@ class DomeStatus:
             return False
         return True
 
+    def validate_dome_command(self, direction: str) -> bool:
+        """Allow only a new, safe rotation direction from a fresh status."""
+        if direction not in ("CW", "CCW"):
+            raise MovementBlocked("Unknown dome direction")
+        if not self.motion_safe:
+            raise MovementBlocked("Shutter card offline or a safety alarm is active")
+        if self.finding_home:
+            raise MovementBlocked("Dome is finding Home")
+        if self.dome_motion == "fault":
+            raise MovementBlocked("Both dome motor relays are active")
+        requested = "clockwise" if direction == "CW" else "counterclockwise"
+        if self.dome_motion == requested:
+            return False
+        if self.dome_motion != "stopped":
+            raise MovementBlocked("Stop dome rotation before changing direction")
+        return True
+
 
 def _card(raw: str) -> CardStatus:
     groups = raw.split(";")
@@ -142,10 +246,17 @@ def _card(raw: str) -> CardStatus:
     # PWM entries later in the group may be fractional; only motor relays
     # are needed here and are always the first two integer entries.
     relays = _bits(":".join(groups[8].split(":")[:2]), 2)
+    temperatures = _measurements(groups[3], 9)
+    instruments = _measurements(groups[4], 2)
+    outputs = _measurements(groups[8], 9)
+    cloud_value = _measurements(groups[5], 1)[0]
+    cloud_code = (int(cloud_value) if cloud_value is not None
+                  and cloud_value >= 0 and cloud_value.is_integer() else None)
     emergency = _integers(groups[9], 1)[0]
     if emergency < 0:
         raise ProtocolError("Invalid emergency flag")
-    return CardStatus(digital, encoder, relays, emergency)
+    return CardStatus(digital, encoder, relays, emergency,
+                      temperatures, instruments, outputs, cloud_code)
 
 
 def parse_status(body: str) -> DomeStatus:

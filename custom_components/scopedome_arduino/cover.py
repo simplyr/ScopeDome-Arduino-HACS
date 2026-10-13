@@ -12,6 +12,21 @@ async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([ScopeDomeShutter(entry, entry.runtime_data)])
 
 
+async def async_move_shutter(coordinator, direction: str, active_level: int | None) -> None:
+    """Refresh and check safety before issuing a shutter command."""
+    await coordinator.async_refresh()
+    if not coordinator.last_update_success:
+        raise HomeAssistantError("Card status is unavailable")
+    try:
+        should_send = coordinator.data.validate_shutter_command(direction, active_level)
+    except MovementBlocked as exc:
+        raise HomeAssistantError(str(exc)) from exc
+    if not should_send:
+        return
+    await coordinator.client.command(f"moveShutter={direction}")
+    await coordinator.async_request_refresh()
+
+
 class ScopeDomeShutter(ScopeDomeEntity, CoverEntity):
     """The paired Slave card's shutter."""
 
@@ -51,19 +66,7 @@ class ScopeDomeShutter(ScopeDomeEntity, CoverEntity):
         }
 
     async def _move(self, direction: str) -> None:
-        await self.coordinator.async_refresh()
-        if not self.coordinator.last_update_success:
-            raise HomeAssistantError("Card status is unavailable")
-        try:
-            should_send = self.coordinator.data.validate_shutter_command(
-                direction, self._active_level
-            )
-        except MovementBlocked as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        if not should_send:
-            return
-        await self.coordinator.client.command(f"moveShutter={direction}")
-        await self.coordinator.async_request_refresh()
+        await async_move_shutter(self.coordinator, direction, self._active_level)
 
     async def async_open_cover(self, **kwargs):
         await self._move("OPEN")

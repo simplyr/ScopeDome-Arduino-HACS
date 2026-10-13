@@ -1,30 +1,49 @@
 # ScopeDome Arduino Card 1.3 for Home Assistant
 
-A Home Assistant integration for a ScopeDome dome with an Ethernet **Master** card and a paired **Slave** shutter card. It reports connection status, safety flags, inputs, the rotation counter, and motion, and provides shutter controls. It uses the local HTTP protocol described in the [official SDK](https://www.scopedome.com/wp-content/uploads/2020/10/ScopeDome_Arduino_Info_5.2SDK.pdf).
+A Home Assistant integration for a ScopeDome dome with an Ethernet **Master** card and a paired **Slave** shutter card. It uses the local HTTP protocol described in the [official SDK](https://www.scopedome.com/wp-content/uploads/2020/10/ScopeDome_Arduino_Info_5.2SDK.pdf).
 
 ## Install with HACS
 
 HACS must already be installed. If needed, follow the [official HACS installation guide](https://www.hacs.dev/docs/use/download/download/).
 
 1. In Home Assistant, open **HACS → ⋮ → Custom repositories**. Enter `https://github.com/simplyr/ScopeDome-Arduino-HACS`, select **Integration**, and choose **Add**. See the [HACS custom repository instructions](https://www.hacs.dev/docs/faq/custom_repositories/).
-2. Find **ScopeDome Arduino Card** in HACS and choose **Download**. Restart Home Assistant.
+2. Find **ScopeDome Arduino Card** in HACS, download the latest release, and restart Home Assistant.
 3. Open **Settings → Devices & services → Add integration → ScopeDome Arduino Card**. Enter the local IPv4 address of the **Master** card, its HTTP port (usually `80`), and its HTTP password. The username is fixed to `scopedome` according to the [manufacturer's manual](https://www.scopedome.com/wp-content/uploads/2020/10/ScopeDome_Arduino_Card_Manual_EN.pdf). No `configuration.yaml` entry is needed.
-4. Check the read-only values first: **Shutter card connected**, the safety flags, and **Shutter open input 1** / **Shutter close input 1**. Opening and closing remain disabled until the end-stop input polarity is confirmed.
-5. Use the official ScopeDome Test App to check both inputs in two known physical shutter positions. Then select the verified active value, `0` or `1`, under **Configure → Shutter contact polarity**. Perform the first movement from Home Assistant while present and supervising the dome.
+4. Open the integration's **Configure** menu. Verify the shutter open and closed limit input values in two known physical shutter positions using the ScopeDome driver's **Shutters** and **Sensors** tabs. Enter the active input value (`0` or `1`) only after checking both switches. Until then, Open/Close controls and the interpreted shutter position remain unavailable or unknown.
+5. Verify the dome Home switch input in the driver at Home and away from Home, then enter its active value. To enable the left/right buttons, enter a small, tested **rotation step in encoder pulses** and **Encoder value for 360**. The step cannot exceed 10° of a full turn; the default `0` disables these buttons.
+6. The second Configure screen accepts optional azimuth and Cloud Index calibration. Copy **Encoder value for 360** from **Config → Card → Card configuration**, **Home Sensor Position** and the dome's Park angle from **Config → Dome**, and **Cloud Index** from **Config → Weather** in the ScopeDome driver. Also enter the **raw encoder count at Home** and whether the *raw count* increases during CW or CCW movement. Leave uncertain fields blank or `unknown`; no azimuth or Park state is estimated without all required values. The driver may display an encoder count with a different zero or sign from the raw card value.
 
-HACS provides updates for this integration. Restart Home Assistant after updating its Python files.
+The [ScopeDome driver manual](https://www.scopedome.com/wp-content/uploads/2021/02/ScopeDome-Driver-Manual-5.5.5.19-ENG.pdf) explains these calibration fields. Its optional `Arduino_Test_App.exe` utility is installed with the Windows driver in `Driver_LS`; it is not required for setup. Restart Home Assistant after a HACS update changes the Python files.
+
+## Controls and states
+
+- **Rotate dome right/left** sends `moveDome=CW:<pulses>` or `moveDome=CCW:<pulses>`. Each press is a bounded relative movement of at most 10° of a turn, not a press-and-hold command. Configure the encoder pulse count and a small step before use. **Stop dome rotation** remains available separately.
+- **Open shutter**, **Close shutter**, and **Stop shutter** are named buttons. The standard Home Assistant **Shutter** cover also supports these actions. Opening and closing require a verified limit-switch polarity and a safe, fresh card status.
+- **Shutter position** shows Open, Closed, Opening, Closing, Between end stops, or Conflicting limit switches when the contacts are verified. The two raw limit inputs remain under Diagnostics for troubleshooting.
+- **Dome at home** uses the verified Home switch input. **Dome at park** is an inferred state: the dome must be stopped and its calibrated azimuth must be within 1° of the configured Park angle. It is not a separate hardware Park signal. **Telescope park switch input** is a different raw input and describes the telescope, not the dome.
+- **Dome azimuth**, **Dome direction**, and **Home azimuth** report values when their required calibration values are supplied. Compass directions use North, North-East, East, South-East, South, South-West, West, and North-West. **Dome raw encoder count** remains available under Diagnostics and is measured in pulses, not degrees.
+
+## Weather and heater readings
+
+The paired card status exposes **dome and shutter motor temperatures**, **electronics temperatures**, **outside temperature**, **hygrometer temperature and relative humidity**, **pyrometer ambient temperature**, and **sky temperature**. It reads the hygrometer from the Dome card and the outside and pyrometer probes from the Shutter card first, as in the standard ScopeDome Cloud Sensor layout. The integration shows **Observed cloud index** as sky temperature minus outside temperature, plus the optional **Cloud index threshold** copied from the driver. **Cloudy (card sensor)** uses the card's own cloud check; the raw Dome and Shutter cloud codes remain available in Diagnostics, including positive codes such as `2`. Missing or implausible probe readings show as unavailable rather than a plausible-looking temperature.
+
+**Dome motor heater**, **Shutter motor heater**, and the two **electronics heaters** show the documented `REL_MOTOR` and `REL_INBOX` output states of each card. They report the controller's relay state, not measured heater current. Check the physical relay wiring if your installation has custom assignments. Weather data read only by an external station or a Windows driver log, such as wind speed, are not in the card's `getStatus` response and are not shown by this integration.
+
+## Safety alarms and troubleshooting
+
+**Dome safety alarm** and **Shutter safety alarm** reflect the controller's emergency flags. The **Dome alarm source** and **Shutter alarm source** sensors explain the codes defined in the SDK: `0` = no alarm, `1` = digital input, `2` = analog input, `3` = cloud sensor. They cannot identify the exact physical sensor or rule. A Master emergency can be configured to monitor a Slave input, so simultaneous alarms do not necessarily mean two separate failures. Movement is blocked while an alarm is active.
+
+If an alarm appears intermittently, inspect the ScopeDome driver's **Sensors**, **Weather**, and **Internal Sensors** tabs and its card error log while the alarm is active. The raw Dome/Shutter rain and cloud inputs are also available under Diagnostics. The optional Arduino Test App's **Get Status → Status Txt** can expose `MASTER_EMERGENCY`, `SLAVE_EMERGENCY`, and the input values; its **Emergency Shutter Close** tab shows the configured rule. Do not clear or disable an emergency trigger without finding its cause.
+
+Setup sends only `getMode`, `getMac`, and `getStatus`; periodic polling sends `getStatus`. Movement commands are limited to documented bounded dome rotation, shutter open/close, and stop commands. Shutter movement requires a connected Slave card, no safety alarm, verified limit contacts, and no conflicting motor movement. Dome rotation requires a configured pulse step, a connected Slave card, no safety alarm, and no conflicting or Home-seeking movement. Keep the manufacturer's physical end stops, weather protection, and UPS rules configured independently of Home Assistant. Supervise the first movement from Home Assistant at the dome.
+
+The integration accepts the 12-group Master/Slave status format documented in SDK 5.2. The [Card 1.3 manual](https://www.scopedome.com/wp-content/uploads/2020/10/ScopeDome_Arduino_Card_Manual_EN.pdf) also mentions firmware 6.7 but does not provide a complete example of its HTTP status response. If your response format differs, setup fails safely. Adapting the parser would require the firmware version and a redacted sample `getStatus` response.
+
+Automatic GoTo, Find Home, and Park commands are not implemented. HTTP Basic Auth does not use TLS here; connect only over a trusted local network or a protected VPN.
 
 ## Manual installation
 
-Copy the entire `custom_components/scopedome_arduino` directory, including `translations`, to `<Home Assistant config>/custom_components/scopedome_arduino` and restart Home Assistant. Then follow steps 3–5 above. Use one installation method per Home Assistant instance so the source of future updates stays clear.
-
-## Scope and safety
-
-Setup sends only `getMode`, `getMac`, and `getStatus`; periodic polling sends `getStatus`. Movement commands are limited to `moveShutter=OPEN`, `moveShutter=CLOSE`, `stopShutter`, and `stopDome`. Opening and closing require a verified input polarity, a fresh valid status, a connected Slave card, no safety alarm, and no conflicting movement. Keep the manufacturer's safety rules, physical end stops, rain sensor, and UPS configured independently of Home Assistant.
-
-The integration accepts the 12-group Master/Slave status format documented in SDK 5.2. The [Card 1.3 manual](https://www.scopedome.com/wp-content/uploads/2020/10/ScopeDome_Arduino_Card_Manual_EN.pdf) also mentions firmware 6.7 but does not provide a complete example of its HTTP status response. If your response format differs, setup fails safely. Adapting the parser would then require the firmware version and a redacted sample `getStatus` response.
-
-The displayed rotation counter is in pulses, not degrees. Rotation to a target azimuth, seeking Home, and automatic weather-based opening are not implemented. HTTP Basic Auth does not use TLS here; connect only over a trusted local network or a protected VPN.
+Copy the entire `custom_components/scopedome_arduino` directory, including `translations`, to `<Home Assistant config>/custom_components/scopedome_arduino` and restart Home Assistant. Then follow steps 3–6 above. Use one installation method per Home Assistant instance so the source of future updates stays clear.
 
 ## Package checks
 
