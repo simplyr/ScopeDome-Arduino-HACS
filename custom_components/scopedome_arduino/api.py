@@ -13,6 +13,7 @@ from .protocol import DomeStatus, ProtocolError, parse_status, response_payload
 
 _LOGGER = logging.getLogger(__name__)
 CALIBRATION_REFRESH_SECONDS = 300
+STATUS_RETRY_DELAY = 0.5
 
 
 class CardAuthError(Exception):
@@ -21,6 +22,10 @@ class CardAuthError(Exception):
 
 class CardConnectionError(Exception):
     """The card could not be reached or returned an HTTP error."""
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
 
 
 class ScopeDomeClient:
@@ -46,10 +51,21 @@ class ScopeDomeClient:
                     if response.status == 401:
                         raise CardAuthError("HTTP authentication failed")
                     if response.status != 200:
-                        raise CardConnectionError(f"HTTP {response.status}")
+                        raise CardConnectionError(
+                            f"Card returned HTTP {response.status}",
+                            retryable=response.status in {408, 429, 500, 502, 503, 504},
+                        )
                     return await response.text()
-            except (ClientError, asyncio.TimeoutError) as exc:
-                raise CardConnectionError("Card did not respond") from exc
+            except asyncio.TimeoutError as exc:
+                raise CardConnectionError(
+                    f"Card request timed out after {HTTP_TIMEOUT} seconds",
+                    retryable=True,
+                ) from exc
+            except ClientError as exc:
+                raise CardConnectionError(
+                    f"Card connection failed ({type(exc).__name__})",
+                    retryable=True,
+                ) from exc
 
     async def identify(self) -> tuple[str, str]:
         """Return mode and hardware MAC. Reads only."""
@@ -63,7 +79,16 @@ class ScopeDomeClient:
         return mode, normalized
 
     async def status(self) -> DomeStatus:
-        status = parse_status(await self._request("getStatus"))
+        """Retry a transient read once; never return cached status after failure."""
+        try:
+            status = parse_status(await self._request("getStatus"))
+        except CardConnectionError as exc:
+            if not exc.retryable:
+                raise
+            _LOGGER.debug("Retrying getStatus after a transient failure: %s", exc)
+            # The request lock is released during the delay so Stop can run.
+            await asyncio.sleep(STATUS_RETRY_DELAY)
+            status = parse_status(await self._request("getStatus"))
         if status.calibrating:
             self._calibrated_rotation = None
             self._next_calibration_read = 0.0

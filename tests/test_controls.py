@@ -173,6 +173,16 @@ class ControlsTests(unittest.IsolatedAsyncioTestCase):
                     await control.async_press()
                 self.assertEqual(coordinator.commands, [])
 
+    async def test_failed_fresh_read_blocks_rotation_with_previous_valid_data(self):
+        coordinator = Coordinator([status()])
+        async def failed_refresh():
+            coordinator.last_update_success = False
+        coordinator.async_refresh = failed_refresh
+        control = button.ScopeDomeRotate(entry(coordinator), coordinator, "CW", "Right", "icon")
+        with self.assertRaisesRegex(exceptions.HomeAssistantError, "status is unavailable"):
+            await control.async_press()
+        self.assertEqual(coordinator.commands, [])
+
     async def test_angle_input_restores_and_does_not_send_commands(self):
         coordinator = Coordinator([status()])
         control = number.ScopeDomeRotationAngle(entry(coordinator), coordinator)

@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import types
 import unittest
+from unittest.mock import AsyncMock, patch
 
 
 class FakeAuth:
@@ -55,7 +56,10 @@ class FakeSession:
 
     def get(self, url, **kwargs):
         self.calls.append((url, kwargs))
-        return FakeResponse(*self.answers.pop(0))
+        answer = self.answers.pop(0)
+        if isinstance(answer, BaseException):
+            raise answer
+        return FakeResponse(*answer)
 
 
 CARD_SAMPLE = (
@@ -66,6 +70,67 @@ STATUS_SAMPLE = f"{CARD_SAMPLE}#{CARD_SAMPLE}#1:0:0:0"
 
 
 class ApiTests(unittest.TestCase):
+    def test_transient_status_failure_retries_and_returns_new_live_data(self):
+        for failure in (asyncio.TimeoutError(), fake_aiohttp.ClientError(), (503, "busy")):
+            with self.subTest(failure=failure):
+                live = STATUS_SAMPLE.replace("32000", "32241")
+                session = FakeSession([failure, (200, live), (200, "3240")])
+                client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+                with patch.object(api.asyncio, "sleep", new_callable=AsyncMock) as delay:
+                    data = asyncio.run(client.status())
+                delay.assert_awaited_once_with(api.STATUS_RETRY_DELAY)
+                self.assertEqual(data.master.encoder, 32241)
+                self.assertEqual(data.calibrated_rotation, 3240)
+                self.assertEqual([url.split("?")[1] for url, _ in session.calls],
+                                 ["getStatus", "getStatus", "getCalibratedRotation"])
+
+    def test_repeated_status_failure_raises_without_using_cached_data(self):
+        session = FakeSession([(200, STATUS_SAMPLE), (200, "3240"),
+                               asyncio.TimeoutError(), asyncio.TimeoutError()])
+        client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+        asyncio.run(client.status())
+        with patch.object(api.asyncio, "sleep", new_callable=AsyncMock):
+            with self.assertRaisesRegex(api.CardConnectionError, "timed out after 8 seconds"):
+                asyncio.run(client.status())
+        self.assertEqual(len(session.calls), 4)
+
+    def test_auth_invalid_status_and_permanent_http_errors_are_not_retried(self):
+        for answer, error in (((401, "denied"), api.CardAuthError),
+                              ((404, "missing"), api.CardConnectionError),
+                              ((200, "invalid status"), api.ProtocolError)):
+            with self.subTest(answer=answer):
+                session = FakeSession([answer])
+                client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+                with self.assertRaises(error):
+                    asyncio.run(client.status())
+                self.assertEqual(len(session.calls), 1)
+
+    def test_movement_timeout_is_not_retried(self):
+        session = FakeSession([asyncio.TimeoutError()])
+        client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+        with self.assertRaises(api.CardConnectionError):
+            asyncio.run(client.command("moveDome=CW:9"))
+        self.assertEqual(len(session.calls), 1)
+
+    def test_stop_can_run_during_the_status_retry_delay(self):
+        async def run():
+            session = FakeSession([asyncio.TimeoutError(), (200, "stopDome|OK"),
+                                   (200, STATUS_SAMPLE), (200, "3240")])
+            client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+            waiting, resume = asyncio.Event(), asyncio.Event()
+            async def delay(seconds):
+                waiting.set()
+                await resume.wait()
+            with patch.object(api.asyncio, "sleep", side_effect=delay):
+                reading = asyncio.create_task(client.status())
+                await waiting.wait()
+                await asyncio.wait_for(client.command("stopDome"), timeout=1)
+                resume.set()
+                await reading
+            self.assertEqual([url.split("?")[1] for url, _ in session.calls],
+                             ["getStatus", "stopDome", "getStatus", "getCalibratedRotation"])
+        asyncio.run(run())
+
     def test_calibrated_rotation_reads_existing_positive_integer(self):
         for answer in ("getCalibratedRotation|OK|3240", "3240"):
             with self.subTest(answer=answer):
