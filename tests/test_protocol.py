@@ -30,6 +30,32 @@ def status(master=None, slave=None, flags="1:0:0:0"):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_user_status_txt_sample(self):
+        master = (
+            "0:0:1:1:1:1:1:1;0.000:1.000:0.445;32241;"
+            "30.83:34.00:19.43:99.99:99.99:99.99:20.25:99.99:99.99;"
+            "998.00:76.68;1;5.07;1:1:1:1:1:1;"
+            "0:0:0:1:0.000:0.000:0:0:0;0;264;1"
+        )
+        slave = (
+            "0:1:1:1:0:1:1:1;0.000:0.999:0.477;32000;"
+            "28.26:29.00:20.68:15.68:99.99:99.99:99.99:22.01:5.98;"
+            "997.00:99.99;1;5.14;1:1:1:1:1:1;"
+            "0:0:0:0:0.000:0.000:0:0:0;0;300;1"
+        )
+        data = protocol.parse_status(f"{master}#{slave}#1:0:0:0")
+        self.assertEqual(data.master.encoder, 32241)
+        self.assertEqual(data.shutter_state(0), "closed")
+        self.assertAlmostEqual(data.slave.temperatures[8] - data.slave.temperatures[3],
+                               -9.70)
+        self.assertIsNone(protocol.temperature(data.master.temperatures[3]))
+        self.assertIsNone(protocol.humidity(data.slave.instruments[1]))
+        self.assertEqual(data.master.instruments[1], 76.68)
+        self.assertTrue(data.master.heater_on(3))
+        self.assertFalse(data.slave.heater_on(3))
+        self.assertEqual(data.master.emergency, 0)
+        self.assertEqual(data.slave.emergency, 0)
+
     def test_weather_measurements_and_heater_relays(self):
         data = protocol.parse_status(status(
             master=card(
@@ -75,12 +101,13 @@ class ProtocolTests(unittest.TestCase):
 
     def test_missing_weather_probe_does_not_hide_card_status(self):
         data = protocol.parse_status(status(slave=card(
-            temperatures="nan:bad:-127:20::20:20:20:999",
-            instruments="1000:nan", clouds="bad",
+            temperatures="nan:bad:-127:20::20:20:99.99:999",
+            instruments="1000:99.99", clouds="bad",
         )))
         self.assertIsNone(data.slave.temperatures[0])
         self.assertIsNone(protocol.temperature(data.slave.temperatures[2]))
         self.assertIsNone(protocol.temperature(data.slave.temperatures[8]))
+        self.assertIsNone(protocol.temperature(data.slave.temperatures[7]))
         self.assertIsNone(protocol.humidity(data.slave.instruments[1]))
         self.assertIsNone(data.slave.clouds)
 

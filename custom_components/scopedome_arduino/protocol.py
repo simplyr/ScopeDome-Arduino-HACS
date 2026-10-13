@@ -90,12 +90,14 @@ def _measurements(group: str, minimum: int) -> tuple[float | None, ...]:
 
 def temperature(value: float | None) -> float | None:
     """Suppress impossible readings, including common disconnected-probe values."""
-    return value if value is not None and -100 <= value <= 150 else None
+    return (value if value is not None and -100 <= value <= 150
+            and abs(value - 99.99) > 0.005 else None)
 
 
 def humidity(value: float | None) -> float | None:
     """Report a physically meaningful relative humidity only."""
-    return value if value is not None and 0 <= value <= 100 else None
+    return (value if value is not None and 0 <= value <= 100
+            and abs(value - 99.99) > 0.005 else None)
 
 
 @dataclass(frozen=True)
