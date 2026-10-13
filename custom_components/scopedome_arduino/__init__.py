@@ -1,5 +1,6 @@
 """ScopeDome Arduino Card integration."""
 
+import asyncio
 import logging
 
 from homeassistant.config_entries import ConfigEntry
@@ -22,6 +23,7 @@ class ScopeDomeCoordinator(DataUpdateCoordinator[DomeStatus]):
     def __init__(self, hass: HomeAssistant, client: ScopeDomeClient) -> None:
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=SCAN_INTERVAL)
         self.client = client
+        self.movement_lock = asyncio.Lock()
 
     async def _async_update_data(self) -> DomeStatus:
         try:

@@ -50,17 +50,18 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
             raise HomeAssistantError(
                 "Set encoder pulses per turn and a rotation step of at most 10 degrees"
             )
-        await self.coordinator.async_refresh()
-        if not self.coordinator.last_update_success:
-            raise HomeAssistantError("Card status is unavailable")
-        try:
-            should_send = self.coordinator.data.validate_dome_command(self._direction)
-        except MovementBlocked as exc:
-            raise HomeAssistantError(str(exc)) from exc
-        if not should_send:
-            return
-        await self.coordinator.client.command(f"moveDome={self._direction}:{self._step}")
-        await self.coordinator.async_request_refresh()
+        async with self.coordinator.movement_lock:
+            await self.coordinator.async_refresh()
+            if not self.coordinator.last_update_success:
+                raise HomeAssistantError("Card status is unavailable")
+            try:
+                should_send = self.coordinator.data.validate_dome_command(self._direction)
+            except MovementBlocked as exc:
+                raise HomeAssistantError(str(exc)) from exc
+            if not should_send:
+                return
+            await self.coordinator.client.command(f"moveDome={self._direction}:{self._step}")
+            await self.coordinator.async_request_refresh()
 
 
 class ScopeDomeMoveShutter(ScopeDomeEntity, ButtonEntity):
