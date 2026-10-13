@@ -143,6 +143,7 @@ class ScopeDomeOptionsFlow(config_entries.OptionsFlow):
         options = self.config_entry.options
         return self.async_show_form(
             step_id="init",
+            last_step=False,
             data_schema=vol.Schema({
                 vol.Required(CONF_SENSOR_ACTIVE_LEVEL, default=options.get(
                     CONF_SENSOR_ACTIVE_LEVEL, UNKNOWN_LEVEL
@@ -179,6 +180,7 @@ class ScopeDomeOptionsFlow(config_entries.OptionsFlow):
             ))
         return self.async_show_form(
             step_id="azimuth",
+            last_step=True,
             data_schema=vol.Schema({
                 **optional_fields,
                 vol.Required(CONF_ENCODER_DIRECTION, default=options.get(
