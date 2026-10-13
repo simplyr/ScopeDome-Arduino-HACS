@@ -1,0 +1,29 @@
+name: Publish v0.2.1 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/publish-v0.2.1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the existing v0.2.1 tag as a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.2.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          gh release create v0.2.1 \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "v0.2.1" \
+            --notes "Shows Next on the first options page, labels both configuration steps, and clarifies the combined shutter control."
