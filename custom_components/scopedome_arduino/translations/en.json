@@ -17,6 +17,7 @@
       }
     },
     "error": {
+      "invalid_host": "Enter the card's IPv4 address.",
       "invalid_auth": "The card rejected the password.",
       "cannot_connect": "Cannot connect to the card.",
       "unsupported_status": "The response is not the documented Master/Slave protocol layout."

@@ -8,7 +8,14 @@ from homeassistant import config_entries
 from homeassistant.const import CONF_HOST
 from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
+from homeassistant.helpers.selector import (
+    NumberSelector,
+    NumberSelectorConfig,
+    NumberSelectorMode,
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 
 from .api import CardAuthError, CardConnectionError, ScopeDomeClient
 from .const import CONF_PASSWORD, CONF_PORT, CONF_SENSOR_ACTIVE_LEVEL, DOMAIN, UNKNOWN_LEVEL
@@ -24,8 +31,10 @@ def _ipv4(value: str) -> str:
 
 
 CONNECTION_SCHEMA = vol.Schema({
-    vol.Required(CONF_HOST): _ipv4,
-    vol.Required(CONF_PORT, default=80): vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+    vol.Required(CONF_HOST): TextSelector(),
+    vol.Required(CONF_PORT, default=80): NumberSelector(
+        NumberSelectorConfig(min=1, max=65535, step=1, mode=NumberSelectorMode.BOX)
+    ),
     vol.Required(CONF_PASSWORD): TextSelector(
         TextSelectorConfig(type=TextSelectorType.PASSWORD, autocomplete="current-password")
     ),
@@ -50,19 +59,25 @@ class ScopeDomeConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             try:
-                mac = await self._probe(user_input)
-            except CardAuthError:
-                errors["base"] = "invalid_auth"
-            except CardConnectionError:
-                errors["base"] = "cannot_connect"
-            except ProtocolError:
-                errors["base"] = "unsupported_status"
+                host = _ipv4(user_input[CONF_HOST])
+            except vol.Invalid:
+                errors[CONF_HOST] = "invalid_host"
             else:
-                await self.async_set_unique_id(mac)
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title=f"ScopeDome {user_input[CONF_HOST]}", data=user_input,
-                )
+                data = {**user_input, CONF_HOST: host, CONF_PORT: int(user_input[CONF_PORT])}
+                try:
+                    mac = await self._probe(data)
+                except CardAuthError:
+                    errors["base"] = "invalid_auth"
+                except CardConnectionError:
+                    errors["base"] = "cannot_connect"
+                except ProtocolError:
+                    errors["base"] = "unsupported_status"
+                else:
+                    await self.async_set_unique_id(mac)
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(
+                        title=f"ScopeDome {host}", data=data,
+                    )
         return self.async_show_form(
             step_id="user", data_schema=CONNECTION_SCHEMA, errors=errors,
         )
