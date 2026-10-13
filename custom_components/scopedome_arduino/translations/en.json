@@ -1,0 +1,38 @@
+{
+  "title": "ScopeDome Arduino Card",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to ScopeDome Master card",
+        "description": "Enter the card's local IPv4 address and HTTP password. Setup sends read-only commands only.",
+        "data": {
+          "host": "Card IPv4 address",
+          "port": "HTTP port",
+          "password": "HTTP password"
+        }
+      },
+      "reauth_confirm": {
+        "title": "Update card password",
+        "data": {"password": "HTTP password"}
+      }
+    },
+    "error": {
+      "invalid_auth": "The card rejected the password.",
+      "cannot_connect": "Cannot connect to the card.",
+      "unsupported_status": "The response is not the documented Master/Slave protocol layout."
+    },
+    "abort": {
+      "already_configured": "This card is already configured.",
+      "reauth_successful": "Password updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Shutter contact polarity",
+        "description": "Check the reported open and close input values with the manufacturer's Test App in known physical positions. Select their active value only after verifying both contacts. Unknown leaves motion controls disabled.",
+        "data": {"sensor_active_level": "Active value of shutter limit contacts (unknown, 0 or 1)"}
+      }
+    }
+  }
+}
