@@ -1,0 +1,23 @@
+name: Publish v0.2.4 release
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/publish-v0.2.4.yml]
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish existing tag as a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v0.2.4 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            exit 0
+          fi
+          gh release create v0.2.4 \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "v0.2.4" \
+            --notes "Weather readings now use the connected probes: Shutter for outside and pyrometer temperatures and cloud status, Dome for hygrometer temperature and humidity. Missing Shutter readings remain unknown instead of falling back to the Dome card. Remove the unused Dome cloud code, cloud input, and rain input entities on upgrade. Preserve the Dome safety alarm, including emergencies triggered by Slave inputs. Update through HACS and restart Home Assistant."
