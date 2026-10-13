@@ -31,7 +31,7 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
         super().__init__(entry, coordinator, f"rotate_{direction.lower()}")
         self._direction = direction
         self._step = int(entry.options.get(CONF_ROTATION_STEP, 0))
-        self._counts_per_turn = entry.options.get(CONF_ENCODER_COUNTS_PER_TURN)
+        self._manual_span = entry.options.get(CONF_ENCODER_COUNTS_PER_TURN)
         self._attr_name = name
         self._attr_icon = icon
 
@@ -41,19 +41,20 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
 
     @property
     def _valid_step(self) -> bool:
-        if not self._counts_per_turn:
+        span = self.coordinator.data.rotation_span(self._manual_span)
+        if not span:
             return False
-        return 1 <= self._step <= min(5000, max(1, int(self._counts_per_turn) // 36))
+        return 1 <= self._step <= min(5000, span // 36)
 
     async def async_press(self) -> None:
-        if not self._valid_step:
-            raise HomeAssistantError(
-                "Set encoder pulses per turn and a rotation step of at most 10 degrees"
-            )
         async with self.coordinator.movement_lock:
             await self.coordinator.async_refresh()
             if not self.coordinator.last_update_success:
                 raise HomeAssistantError("Card status is unavailable")
+            if not self._valid_step:
+                raise HomeAssistantError(
+                    "A valid encoder calibration and a rotation step of at most 10 degrees are required"
+                )
             try:
                 should_send = self.coordinator.data.validate_dome_command(self._direction)
             except MovementBlocked as exc:

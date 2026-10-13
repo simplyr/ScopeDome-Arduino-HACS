@@ -15,7 +15,7 @@ from .const import (
 def calibrated_azimuth(status, options) -> float | None:
     """Return no angle until all installation-specific values are supplied."""
     return status.azimuth(
-        options.get(CONF_ENCODER_COUNTS_PER_TURN),
+        status.rotation_span(options.get(CONF_ENCODER_COUNTS_PER_TURN)),
         options.get(CONF_HOME_ENCODER_COUNT),
         options.get(CONF_HOME_AZIMUTH),
         options.get(CONF_ENCODER_DIRECTION, UNKNOWN_LEVEL),

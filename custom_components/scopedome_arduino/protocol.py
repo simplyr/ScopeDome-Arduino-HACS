@@ -40,6 +40,14 @@ def compass_direction(azimuth: float) -> str:
     return COMPASS_DIRECTIONS[int((azimuth % 360 + 22.5) // 45) % 8]
 
 
+def azimuth_dms(azimuth: float) -> str:
+    """Format a normalized azimuth in degrees, minutes, and whole seconds."""
+    total_seconds = round((azimuth % 360) * 3600) % (360 * 3600)
+    degrees, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    return f"{degrees}°{minutes:02d}′{seconds:02d}″"
+
+
 def response_payload(command: str, body: str) -> str:
     """Read a command response, with or without its serial-style prefix."""
     value = body.strip()
@@ -130,6 +138,17 @@ class DomeStatus:
     slave: CardStatus
     slave_online: bool
     finding_home: bool
+    calibrated_rotation: int | None = None
+    calibrating: bool = False
+
+    def rotation_span(self, manual_fallback=None) -> int | None:
+        """Prefer the card's measured span over the optional manual fallback."""
+        value = self.calibrated_rotation or manual_fallback
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and isfinite(value) and value == int(value)
+                and 1 <= value <= 1000000):
+            return int(value)
+        return None
 
     @property
     def dome_motion(self) -> str:
@@ -206,6 +225,8 @@ class DomeStatus:
             raise MovementBlocked("Verify shutter contact active level in integration options")
         if not self.motion_safe:
             raise MovementBlocked("Slave offline or emergency active; movement blocked")
+        if self.calibrating:
+            raise MovementBlocked("Dome encoder calibration is running")
         state = self.shutter_state(active_level)
         if state == "fault":
             raise MovementBlocked("Both shutter limit contacts are active")
@@ -229,6 +250,8 @@ class DomeStatus:
             raise MovementBlocked("Shutter card offline or a safety alarm is active")
         if self.finding_home:
             raise MovementBlocked("Dome is finding Home")
+        if self.calibrating:
+            raise MovementBlocked("Dome encoder calibration is running")
         if self.dome_motion == "fault":
             raise MovementBlocked("Both dome motor relays are active")
         requested = "clockwise" if direction == "CW" else "counterclockwise"
@@ -245,8 +268,8 @@ def _card(raw: str) -> CardStatus:
         raise ProtocolError(f"Expected 12 card status groups, got {len(groups)}")
     digital = _bits(groups[0], 8)
     encoder = _integers(groups[2], 1)[0]
-    # PWM entries later in the group may be fractional; only motor relays
-    # are needed here and are always the first two integer entries.
+    # Movement checks use the first two integer motor relays. Keep the
+    # remaining heater, PWM, and free outputs separately as numeric readings.
     relays = _bits(":".join(groups[8].split(":")[:2]), 2)
     temperatures = _measurements(groups[3], 9)
     instruments = _measurements(groups[4], 2)
@@ -267,4 +290,5 @@ def parse_status(body: str) -> DomeStatus:
     if len(parts) != 3:
         raise ProtocolError("Expected master, slave, and link flags")
     flags = _bits(parts[2], 4)
-    return DomeStatus(_card(parts[0]), _card(parts[1]), bool(flags[0]), bool(flags[1]))
+    return DomeStatus(_card(parts[0]), _card(parts[1]), bool(flags[0]), bool(flags[1]),
+                      calibrating=bool(flags[3]))

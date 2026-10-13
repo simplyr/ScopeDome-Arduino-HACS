@@ -4,11 +4,11 @@ from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, Sen
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import (
-    CONF_CLOUD_INDEX_THRESHOLD, CONF_HOME_AZIMUTH,
+    CONF_CLOUD_INDEX_THRESHOLD, CONF_ENCODER_COUNTS_PER_TURN, CONF_HOME_AZIMUTH,
     CONF_SENSOR_ACTIVE_LEVEL, UNKNOWN_LEVEL,
 )
 from .entity import ScopeDomeEntity, calibrated_azimuth
-from .protocol import compass_direction, emergency_reason, humidity, temperature
+from .protocol import azimuth_dms, compass_direction, emergency_reason, humidity, temperature
 
 
 def station_reading(status, group: str, index: int, normalize=temperature,
@@ -39,7 +39,9 @@ def observed_cloud_index(status):
 async def async_setup_entry(hass, entry, async_add_entities):
     async_add_entities([
         ScopeDomeEncoder(entry, entry.runtime_data),
+        ScopeDomeRotationSpan(entry, entry.runtime_data),
         ScopeDomeAzimuth(entry, entry.runtime_data),
+        ScopeDomeAzimuthDMS(entry, entry.runtime_data),
         ScopeDomeCompass(entry, entry.runtime_data),
         ScopeDomeHomeAzimuth(entry, entry.runtime_data),
         ScopeDomeMotion(entry, entry.runtime_data),
@@ -147,12 +149,37 @@ class ScopeDomeEncoder(ScopeDomeEntity, SensorEntity):
         return self.coordinator.data.master.encoder
 
 
+class ScopeDomeRotationSpan(ScopeDomeEntity, SensorEntity):
+    """Show the effective calibration and whether it came from the card."""
+
+    _attr_name = "Encoder pulses per turn"
+    _attr_icon = "mdi:counter"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry, coordinator) -> None:
+        super().__init__(entry, coordinator, "rotation_span")
+        self._fallback = entry.options.get(CONF_ENCODER_COUNTS_PER_TURN)
+
+    @property
+    def native_value(self):
+        return self.coordinator.data.rotation_span(self._fallback)
+
+    @property
+    def extra_state_attributes(self):
+        status = self.coordinator.data
+        source = ("card" if status.calibrated_rotation is not None
+                  else "manual_fallback" if self.native_value is not None
+                  else "unavailable")
+        return {"source": source, "card_calibration": status.calibrated_rotation}
+
+
 class ScopeDomeAzimuth(ScopeDomeEntity, SensorEntity):
     """Angle derived from installation-specific encoder calibration."""
 
     _attr_name = "Dome azimuth"
     _attr_icon = "mdi:compass-outline"
     _attr_native_unit_of_measurement = "°"
+    _attr_suggested_display_precision = 2
 
     def __init__(self, entry, coordinator) -> None:
         super().__init__(entry, coordinator, "azimuth")
@@ -161,7 +188,23 @@ class ScopeDomeAzimuth(ScopeDomeEntity, SensorEntity):
     @property
     def native_value(self):
         value = calibrated_azimuth(self.coordinator.data, self._options)
-        return None if value is None else round(value, 1)
+        return None if value is None else round(value, 2)
+
+
+class ScopeDomeAzimuthDMS(ScopeDomeEntity, SensorEntity):
+    """Display the same angle in the ScopeDome driver's DMS notation."""
+
+    _attr_name = "Dome azimuth (DMS)"
+    _attr_icon = "mdi:compass-outline"
+
+    def __init__(self, entry, coordinator) -> None:
+        super().__init__(entry, coordinator, "azimuth_dms")
+        self._options = entry.options
+
+    @property
+    def native_value(self):
+        value = calibrated_azimuth(self.coordinator.data, self._options)
+        return None if value is None else azimuth_dms(value)
 
 
 class ScopeDomeCompass(ScopeDomeEntity, SensorEntity):

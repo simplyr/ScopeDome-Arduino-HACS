@@ -13,7 +13,9 @@
       },
       "reauth_confirm": {
         "title": "Update card password",
-        "data": {"password": "HTTP password"}
+        "data": {
+          "password": "HTTP password"
+        }
       }
     },
     "error": {
@@ -31,7 +33,7 @@
     "step": {
       "init": {
         "title": "Step 1 of 2: Contacts and rotation step",
-        "description": "Check the shutter limits and dome Home switch in the ScopeDome driver's Shutters and Sensors tabs at known physical positions. Select each active input value only after verifying it. Enter a small, tested encoder pulse step for each left/right button press; 0 disables rotation buttons. Encoder pulses per turn must also be set on the next screen.",
+        "description": "Check the shutter limits and dome Home switch in the ScopeDome driver's Shutters and Sensors tabs at known physical positions. Select each active input value only after verifying it. Enter a small, tested encoder pulse step for each left/right button press; 0 disables rotation buttons. Encoder pulses per turn are read automatically from the card.",
         "data": {
           "sensor_active_level": "Shutter limit active input (unknown, 0 or 1)",
           "home_active_level": "Dome Home switch active input (unknown, 0 or 1)",
@@ -40,9 +42,9 @@
       },
       "azimuth": {
         "title": "Step 2 of 2: Azimuth and cloud calibration",
-        "description": "Copy 'Encoder value for 360' from Config → Card and 'Home Sensor Position' plus the park angle from Config → Dome. Check whether the raw encoder count rises during clockwise or counterclockwise rotation. The card's documented reset value is 32000; verify it at Home. Cloud Index is a threshold in Config → Weather. Leave uncertain fields blank.",
+        "description": "Encoder pulses per turn are read automatically using getCalibratedRotation. Fill the manual fallback only if the card has no valid calibration. Copy 'Home Sensor Position' and the park angle from Config → Dome. Check the raw encoder count and direction at Home. Cloud Index is a threshold in Config → Weather. Leave uncertain fields blank.",
         "data": {
-          "encoder_counts_per_turn": "Encoder pulses for 360° (optional)",
+          "encoder_counts_per_turn": "Encoder pulses for 360° (manual fallback, optional)",
           "home_azimuth": "Home azimuth in degrees (optional)",
           "park_azimuth": "Dome park azimuth in degrees (optional)",
           "home_encoder_count": "Raw encoder count at Home (optional)",

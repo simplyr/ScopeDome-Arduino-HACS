@@ -1,6 +1,7 @@
 """Protocol tests run with the Python standard library and no real card."""
 
 import importlib.util
+from dataclasses import replace
 from pathlib import Path
 import unittest
 
@@ -30,6 +31,32 @@ def status(master=None, slave=None, flags="1:0:0:0"):
 
 
 class ProtocolTests(unittest.TestCase):
+    def test_azimuth_dms_matches_driver_and_carries_at_boundaries(self):
+        self.assertEqual(protocol.azimuth_dms(279 + 33 / 60 + 20 / 3600),
+                         "279°33′20″")
+        self.assertEqual(protocol.azimuth_dms(12 + 59 / 60 + 59.6 / 3600),
+                         "13°00′00″")
+        self.assertEqual(protocol.azimuth_dms(359 + 59 / 60 + 59.6 / 3600),
+                         "0°00′00″")
+        self.assertEqual(protocol.azimuth_dms(-1), "359°00′00″")
+    def test_card_rotation_span_takes_precedence_over_manual_fallback(self):
+        data = protocol.parse_status(status())
+        self.assertIsNone(data.rotation_span())
+        self.assertEqual(data.rotation_span(3240), 3240)
+        for invalid in (0, -1, 9.5, float("nan"), True, "3240"):
+            with self.subTest(invalid=invalid):
+                self.assertIsNone(data.rotation_span(invalid))
+        data = replace(data, calibrated_rotation=6480)
+        self.assertEqual(data.rotation_span(3240), 6480)
+
+    def test_card_calibration_blocks_manual_movement(self):
+        data = protocol.parse_status(status(flags="1:0:0:1"))
+        self.assertTrue(data.calibrating)
+        with self.assertRaises(protocol.MovementBlocked):
+            data.validate_dome_command("CW")
+        with self.assertRaises(protocol.MovementBlocked):
+            data.validate_shutter_command("CLOSE", 0)
+
     def test_user_status_txt_sample(self):
         master = (
             "0:0:1:1:1:1:1:1;0.000:1.000:0.445;32241;"

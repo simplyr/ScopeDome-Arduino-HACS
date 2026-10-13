@@ -1,12 +1,18 @@
 """HTTP transport for the card's documented query-command interface."""
 
 import asyncio
+from dataclasses import replace
+import logging
 import re
+from time import monotonic
 
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .const import HTTP_TIMEOUT
 from .protocol import DomeStatus, ProtocolError, parse_status, response_payload
+
+_LOGGER = logging.getLogger(__name__)
+CALIBRATION_REFRESH_SECONDS = 300
 
 
 class CardAuthError(Exception):
@@ -25,6 +31,8 @@ class ScopeDomeClient:
         self._url = f"http://{host}:{port}/"
         self._auth = BasicAuth("scopedome", password)
         self._lock = asyncio.Lock()
+        self._calibrated_rotation = None
+        self._next_calibration_read = 0.0
 
     async def _request(self, command: str) -> str:
         async with self._lock:
@@ -55,7 +63,28 @@ class ScopeDomeClient:
         return mode, normalized
 
     async def status(self) -> DomeStatus:
-        return parse_status(await self._request("getStatus"))
+        status = parse_status(await self._request("getStatus"))
+        if status.calibrating:
+            self._calibrated_rotation = None
+            self._next_calibration_read = 0.0
+            return status
+        if monotonic() >= self._next_calibration_read:
+            self._next_calibration_read = monotonic() + CALIBRATION_REFRESH_SECONDS
+            try:
+                self._calibrated_rotation = await self.calibrated_rotation()
+            except (CardConnectionError, ProtocolError):
+                self._calibrated_rotation = None
+                _LOGGER.debug("Automatic encoder calibration is unavailable")
+        return replace(status, calibrated_rotation=self._calibrated_rotation)
+
+    async def calibrated_rotation(self) -> int:
+        """Read an existing calibration without starting a calibration movement."""
+        payload = response_payload(
+            "getCalibratedRotation", await self._request("getCalibratedRotation")
+        )
+        if not re.fullmatch(r"[0-9]+", payload) or not 1 <= int(payload) <= 1000000:
+            raise ProtocolError("Card has no valid calibrated rotation span")
+        return int(payload)
 
     async def command(self, name: str) -> None:
         """Send only documented movements with bounded dome rotation."""
