@@ -61,7 +61,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
                          None, category=None),
         ScopeDomeBinary(entry, coordinator, "shutter_rain_input", "Shutter rain input",
                          lambda s: bool(s.slave.digital[5]) if s.slave_online else None,
-                         None),
+                         None, category=None),
         ScopeDomeBinary(entry, coordinator, "shutter_cloud_input", "Shutter cloud input",
                          lambda s: bool(s.slave.digital[6]) if s.slave_online else None,
                          None),
