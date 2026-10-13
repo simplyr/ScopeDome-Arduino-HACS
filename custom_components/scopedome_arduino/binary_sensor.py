@@ -2,13 +2,22 @@
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.helpers.entity import EntityCategory
+from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_HOME_ACTIVE_LEVEL, CONF_PARK_AZIMUTH, UNKNOWN_LEVEL
+from .const import CONF_HOME_ACTIVE_LEVEL, CONF_PARK_AZIMUTH, DOMAIN, UNKNOWN_LEVEL
 from .entity import ScopeDomeEntity, calibrated_azimuth
 from .protocol import emergency_reason
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    registry = er.async_get(hass)
+    for domain, key in (("sensor", "master_cloud_code"),
+                        ("binary_sensor", "dome_cloud_input"),
+                        ("binary_sensor", "dome_rain_input")):
+        entity_id = registry.async_get_entity_id(domain, DOMAIN, f"{entry.unique_id}_{key}")
+        registered = registry.async_get(entity_id) if entity_id else None
+        if registered is not None and registered.config_entry_id == entry.entry_id:
+            registry.async_remove(entity_id)
     coordinator = entry.runtime_data
     home_level = entry.options.get(CONF_HOME_ACTIVE_LEVEL, UNKNOWN_LEVEL)
     home_level = None if home_level == UNKNOWN_LEVEL else int(home_level)
@@ -48,14 +57,11 @@ async def async_setup_entry(hass, entry, async_add_entities):
                          lambda s: s.slave.heater_on(2) if s.slave_online else None,
                          None, category=None),
         ScopeDomeBinary(entry, coordinator, "card_cloudy", "Cloudy (card sensor)",
-                         lambda s: s.master.clouds, None, category=None),
-        ScopeDomeBinary(entry, coordinator, "dome_rain_input", "Dome rain input",
-                         lambda s: bool(s.master.digital[5]), None),
+                         lambda s: s.slave.clouds if s.slave_online else None,
+                         None, category=None),
         ScopeDomeBinary(entry, coordinator, "shutter_rain_input", "Shutter rain input",
                          lambda s: bool(s.slave.digital[5]) if s.slave_online else None,
                          None),
-        ScopeDomeBinary(entry, coordinator, "dome_cloud_input", "Dome cloud input",
-                         lambda s: bool(s.master.digital[6]), None),
         ScopeDomeBinary(entry, coordinator, "shutter_cloud_input", "Shutter cloud input",
                          lambda s: bool(s.slave.digital[6]) if s.slave_online else None,
                          None),

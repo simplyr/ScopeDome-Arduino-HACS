@@ -13,27 +13,20 @@ from .protocol import azimuth_dms, compass_direction, emergency_reason, humidity
 
 def station_reading(status, group: str, index: int, normalize=temperature,
                     *, prefer_slave: bool = True):
-    """Read a weather probe from its expected card, with the other as fallback."""
-    cards = ([status.slave, status.master] if prefer_slave
-             else [status.master, status.slave])
-    for card in cards:
-        if card is status.slave and not status.slave_online:
-            continue
-        value = normalize(getattr(card, group)[index])
-        if value is not None:
-            return value
-    return None
+    """Read the connected card for this probe without substituting another card."""
+    if prefer_slave and not status.slave_online:
+        return None
+    card = status.slave if prefer_slave else status.master
+    return normalize(getattr(card, group)[index])
 
 
 def observed_cloud_index(status):
     """Sky minus outside temperature, checked on the same card."""
-    cards = ([status.slave] if status.slave_online else []) + [status.master]
-    for card in cards:
-        sky = temperature(card.temperatures[8])
-        outside = temperature(card.temperatures[3])
-        if sky is not None and outside is not None:
-            return round(sky - outside, 1)
-    return None
+    if not status.slave_online:
+        return None
+    sky = temperature(status.slave.temperatures[8])
+    outside = temperature(status.slave.temperatures[3])
+    return None if sky is None or outside is None else round(sky - outside, 1)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -85,7 +78,6 @@ async def async_setup_entry(hass, entry, async_add_entities):
                          "Cloud index threshold",
                          lambda s: entry.options.get(CONF_CLOUD_INDEX_THRESHOLD),
                          "temperature_difference"),
-        ScopeDomeCloudCode(entry, entry.runtime_data, "master", "Dome cloud code"),
         ScopeDomeCloudCode(entry, entry.runtime_data, "slave", "Shutter cloud code"),
     ])
 

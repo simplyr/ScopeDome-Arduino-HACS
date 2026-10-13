@@ -36,11 +36,21 @@ package.__path__ = [str(Path(__file__).resolve().parents[1] /
                         "custom_components/scopedome_arduino")]
 entity = types.ModuleType(f"{package.__name__}.entity")
 entity.ScopeDomeEntity = FakeEntity
+entity.calibrated_azimuth = lambda status, options: None
 button_module = types.ModuleType("homeassistant.components.button")
 button_module.ButtonEntity = type("ButtonEntity", (), {})
 number_module = types.ModuleType("homeassistant.components.number")
 number_module.NumberMode = types.SimpleNamespace(BOX="box")
 number_module.RestoreNumber = FakeRestoreNumber
+sensor_module = types.ModuleType("homeassistant.components.sensor")
+sensor_module.SensorEntity = type("SensorEntity", (), {})
+sensor_module.SensorDeviceClass = types.SimpleNamespace(HUMIDITY="humidity", TEMPERATURE="temperature")
+sensor_module.SensorStateClass = types.SimpleNamespace(MEASUREMENT="measurement")
+binary_module = types.ModuleType("homeassistant.components.binary_sensor")
+binary_module.BinarySensorEntity = type("BinarySensorEntity", (), {})
+binary_module.BinarySensorDeviceClass = types.SimpleNamespace(CONNECTIVITY="connectivity", PROBLEM="problem")
+entity_module = types.ModuleType("homeassistant.helpers.entity")
+entity_module.EntityCategory = types.SimpleNamespace(DIAGNOSTIC="diagnostic")
 exceptions = types.ModuleType("homeassistant.exceptions")
 exceptions.HomeAssistantError = type("HomeAssistantError", (Exception,), {})
 helpers = types.ModuleType("homeassistant.helpers")
@@ -53,12 +63,17 @@ with patch.dict(sys.modules, {
     "homeassistant.components": types.ModuleType("homeassistant.components"),
     button_module.__name__: button_module,
     number_module.__name__: number_module,
+    sensor_module.__name__: sensor_module,
+    binary_module.__name__: binary_module,
+    entity_module.__name__: entity_module,
     exceptions.__name__: exceptions,
     helpers.__name__: helpers,
 }):
     button = importlib.import_module(f"{package.__name__}.button")
     number = importlib.import_module(f"{package.__name__}.number")
     protocol = importlib.import_module(f"{package.__name__}.protocol")
+    sensor = importlib.import_module(f"{package.__name__}.sensor")
+    binary_sensor = importlib.import_module(f"{package.__name__}.binary_sensor")
 
 
 def status(relays="0:0", emergency=0):
@@ -196,6 +211,70 @@ class ControlsTests(unittest.IsolatedAsyncioTestCase):
                                        entry(coordinator), added.extend)
         self.assertEqual(removed, ["custom_open", "custom_close"])
         self.assertEqual([entity.key for entity in added], ["rotate_cw", "rotate_ccw", "stop_dome"])
+
+    async def test_weather_uses_only_the_card_with_the_connected_probe(self):
+        data = status()
+        data = replace(data,
+                       master=replace(data.master, temperatures=(20,) * 9,
+                                      instruments=(998, 76.68), cloud_code=3),
+                       slave=replace(data.slave, temperatures=(21, 22, 23, 15.81, 25, 26,
+                                                              99.99, 38.58, -3.67),
+                                     instruments=(997, 99.99), cloud_code=0))
+        coordinator = Coordinator([data])
+        sensors, binaries = [], []
+        registry = types.SimpleNamespace(async_get_entity_id=lambda *args: None)
+        await sensor.async_setup_entry(None, entry(coordinator), sensors.extend)
+        await binary_sensor.async_setup_entry(types.SimpleNamespace(registry=registry),
+                                              entry(coordinator), binaries.extend)
+        sensors = {entity.key: entity for entity in sensors}
+        binaries = {entity.key: entity for entity in binaries}
+        self.assertFalse(binaries["card_cloudy"].is_on)
+        self.assertEqual(sensors["outside_temperature"].native_value, 15.81)
+        self.assertEqual(sensors["sky_temperature"].native_value, -3.67)
+        self.assertEqual(sensors["hygrometer_temperature"].native_value, 20)
+        self.assertEqual(sensors["relative_humidity"].native_value, 76.68)
+        self.assertEqual(sensors["observed_cloud_index"].native_value, -19.5)
+        coordinator.data = replace(data, slave_online=False)
+        for key in ("outside_temperature", "sky_temperature", "observed_cloud_index"):
+            self.assertIsNone(sensors[key].native_value)
+        self.assertIsNone(binaries["card_cloudy"].is_on)
+        coordinator.data = replace(data, slave=replace(data.slave, temperatures=(99.99,) * 9),
+                                   master=replace(data.master, instruments=(998, 99.99)))
+        self.assertIsNone(sensors["outside_temperature"].native_value)
+        self.assertIsNone(sensors["relative_humidity"].native_value)
+
+    async def test_remove_only_unused_master_weather_and_keep_safety_alarm(self):
+        removed, added, lookups = [], [], []
+        records = {
+            "old_cloud_code": types.SimpleNamespace(config_entry_id="entry_1"),
+            "old_cloud_input": types.SimpleNamespace(config_entry_id="entry_1"),
+            "other_rain_input": types.SimpleNamespace(config_entry_id="other_entry"),
+        }
+        lookup = {"card_mac_master_cloud_code": "old_cloud_code",
+                  "card_mac_dome_cloud_input": "old_cloud_input",
+                  "card_mac_dome_rain_input": "other_rain_input"}
+        def find(domain, platform, unique):
+            lookups.append((domain, platform, unique))
+            return lookup.get(unique)
+        registry = types.SimpleNamespace(async_get_entity_id=find, async_get=records.get,
+                                         async_remove=removed.append)
+        coordinator = Coordinator([status(emergency=3)])
+        await binary_sensor.async_setup_entry(types.SimpleNamespace(registry=registry),
+                                              entry(coordinator), added.extend)
+        self.assertEqual(removed, ["old_cloud_code", "old_cloud_input"])
+        self.assertEqual(lookups, [
+            ("sensor", "scopedome_arduino", "card_mac_master_cloud_code"),
+            ("binary_sensor", "scopedome_arduino", "card_mac_dome_cloud_input"),
+            ("binary_sensor", "scopedome_arduino", "card_mac_dome_rain_input"),
+        ])
+        entities = {entity.key: entity for entity in added}
+        self.assertTrue(entities["master_emergency"].is_on)
+        self.assertEqual(entities["master_emergency"].extra_state_attributes["alarm_type"],
+                         "Cloud sensor alarm")
+        self.assertIn("shutter_rain_input", entities)
+        self.assertIn("shutter_cloud_input", entities)
+        self.assertNotIn("dome_rain_input", entities)
+        self.assertNotIn("dome_cloud_input", entities)
 
 
 if __name__ == "__main__":
