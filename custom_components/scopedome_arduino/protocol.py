@@ -94,6 +94,26 @@ def response_payload(command: str, body: str) -> str:
     return value
 
 
+def validate_movement_acknowledgement(command: str, body: str) -> None:
+    """Match an OK reply to either the command verb or the full request."""
+    answer = body.strip()
+    if answer == "OK":
+        return
+    verb = command.split("=", 1)[0]
+    if answer and len(answer) <= 8192 and not any(char in answer for char in "<>\r\n"):
+        fields = answer.split("|", 2)
+        if len(fields) >= 2 and fields[0] in {verb, command}:
+            if fields[1] == "OK":
+                return
+            if fields[1] in {"ERR", "ERROR", "FAIL", "FAILED"}:
+                raise ProtocolError(f"Card rejected {verb} ({fields[1]})")
+    # An unrecognized reply does not prove that the physical command failed.
+    raise ProtocolError(
+        f"{verb} was sent but its acknowledgement was not recognized; "
+        "movement may have started. Use Stop before retrying"
+    )
+
+
 def _bits(group: str, minimum: int) -> tuple[int, ...]:
     try:
         values = tuple(int(item) for item in group.split(":"))

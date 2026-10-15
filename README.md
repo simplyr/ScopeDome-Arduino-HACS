@@ -53,6 +53,10 @@ All entities share one status update every 15 seconds. A failed update makes the
 
 For persistent failures, inspect **Settings → System → Logs** for `scopedome_arduino`. Error messages distinguish a request timeout, the network exception type, and an HTTP status code without including credentials or the response body. A successful retry can reduce brief unavailable periods; it does not repair a network or controller fault.
 
+### Movement acknowledgement errors
+
+From version 0.2.9, movement acknowledgements can echo the command verb without its arguments: a request such as `moveDome=CW:9` accepts `moveDome|OK|...` as well as `moveDome=CW:9|OK|...` or the legacy bare `OK`. The echoed verb must match the sent command, and the status must be exactly `OK`. An acknowledgement for another verb, a different full request, malformed data, or an explicit error is rejected. Commands are never repeated automatically. An unrecognized response can arrive after movement has already started; use Stop before trying again. The change affects response parsing and does not alter movement limits or alarm handling.
+
 The integration accepts the 12-group Master/Slave status format documented in SDK 5.2. Tests also cover a supplied firmware 7.2 status sample. If your response format differs, setup fails safely. Adapting the parser would require the firmware version and a redacted sample `getStatus` response.
 
 Telescope tracking and automatic slaving are not implemented. HTTP Basic Auth does not use TLS here; connect only over a trusted local network or a protected VPN.

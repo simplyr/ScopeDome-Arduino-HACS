@@ -11,6 +11,7 @@ from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 from .const import HTTP_TIMEOUT
 from .protocol import (
     MAX_DOME_COMMAND_PULSES, DomeStatus, ProtocolError, parse_status, response_payload,
+    validate_movement_acknowledgement,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -122,6 +123,5 @@ class ScopeDomeClient:
             and int(match.group(2)) <= MAX_DOME_COMMAND_PULSES
         ):
             raise ValueError("Unsupported card command")
-        answer = (await self._request(name)).strip()
-        if not (answer == "OK" or answer == f"{name}|OK" or answer.startswith(f"{name}|OK|")):
-            raise ProtocolError("Card did not acknowledge movement command")
+        answer = await self._request(name)
+        validate_movement_acknowledgement(name, answer)

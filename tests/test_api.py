@@ -218,6 +218,36 @@ class ApiTests(unittest.TestCase):
             asyncio.run(client.command(command))
         self.assertEqual(len(session.calls), 3)
 
+    def test_movement_acknowledgement_accepts_command_verb_without_arguments(self):
+        for command in ("moveDome=CW:9", "moveDome=CCW:81", "moveShutter=OPEN",
+                        "moveShutter=CLOSE", "stopDome", "stopShutter", "findHome"):
+            verb = command.split("=", 1)[0]
+            for answer in ("OK", f"{verb}|OK", f"{verb}|OK|\r\n", f"{verb}|OK|1",
+                           f"{command}|OK", f"{command}|OK|\r\n"):
+                with self.subTest(command=command, answer=answer):
+                    session = FakeSession([(200, answer)])
+                    client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+                    asyncio.run(client.command(command))
+                    self.assertEqual(len(session.calls), 1)
+
+    def test_rejected_or_unconfirmed_commands_are_never_repeated(self):
+        for answer in ("moveDome|ERROR|busy", "moveDome=CW:9|ERR|blocked",
+                       "moveShutter|OK|", "moveDome=CCW:9|OK|", "getStatus|OK|",
+                       "moveDome|OKAY|", "moveDome|FAIL|", "", "<html>OK</html>",
+                       "moveDome|OK|\ngetStatus|ERROR|"):
+            with self.subTest(answer=answer):
+                session = FakeSession([(200, answer)])
+                client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+                with self.assertRaises(api.ProtocolError):
+                    asyncio.run(client.command("moveDome=CW:9"))
+                self.assertEqual(len(session.calls), 1)
+
+    def test_unrecognized_acknowledgement_explains_uncertain_motion(self):
+        session = FakeSession([(200, "unrecognized")])
+        client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+        with self.assertRaisesRegex(api.ProtocolError, "movement may have started"):
+            asyncio.run(client.command("moveDome=CW:9"))
+
     def test_auth_and_rejected_command_are_errors(self):
         unauthorized = api.ScopeDomeClient(FakeSession([(401, "")]), "192.0.2.1", 80, "bad")
         with self.assertRaises(api.CardAuthError):
