@@ -204,11 +204,19 @@ class ApiTests(unittest.TestCase):
         asyncio.run(client.command("moveDome=CW:9"))
         with self.assertRaises(ValueError):
             asyncio.run(client.command("clearEmergencys"))
-        for unbounded in ("moveDome=CW", "moveDome=CW:0", "moveDome=CW:5001",
+        for unbounded in ("moveDome=CW", "moveDome=CW:0", "moveDome=CW:500001",
                           "moveDome=CW:9&clearEmergencys"):
             with self.subTest(unbounded=unbounded), self.assertRaises(ValueError):
                 asyncio.run(client.command(unbounded))
         self.assertEqual(len(session.calls), 2)
+
+    def test_navigation_commands_are_documented_and_bounded(self):
+        commands = ("findHome", "moveDome=CW:500000", "moveDome=CCW:1620")
+        session = FakeSession([(200, f"{command}|OK") for command in commands])
+        client = api.ScopeDomeClient(session, "192.0.2.1", 80, "secret")
+        for command in commands:
+            asyncio.run(client.command(command))
+        self.assertEqual(len(session.calls), 3)
 
     def test_auth_and_rejected_command_are_errors(self):
         unauthorized = api.ScopeDomeClient(FakeSession([(401, "")]), "192.0.2.1", 80, "bad")

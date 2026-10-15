@@ -28,6 +28,7 @@ from .const import (
     CONF_PARK_AZIMUTH,
     CONF_PASSWORD,
     CONF_PORT,
+    CONF_RAIN_ACTIVE_LEVEL,
     CONF_SENSOR_ACTIVE_LEVEL,
     DOMAIN,
     UNKNOWN_LEVEL,
@@ -152,6 +153,10 @@ class ScopeDomeOptionsFlow(config_entries.OptionsFlow):
                     CONF_HOME_ACTIVE_LEVEL, UNKNOWN_LEVEL
                 )):
                     vol.In([UNKNOWN_LEVEL, "0", "1"]),
+                vol.Required(CONF_RAIN_ACTIVE_LEVEL, default=options.get(
+                    CONF_RAIN_ACTIVE_LEVEL, "0"
+                )):
+                    vol.In(["0", "1"]),
             }),
         )
 

@@ -25,6 +25,7 @@ class ScopeDomeCoordinator(DataUpdateCoordinator[DomeStatus]):
         self.client = client
         self.movement_lock = asyncio.Lock()
         self.rotation_angle = 0.0
+        self.target_azimuth = 0.0
         self.dome_stop_generation = 0
         self.dome_rotation_task = None
 

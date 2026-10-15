@@ -1,4 +1,4 @@
-"""Bounded dome rotation and stop controls."""
+"""Dome rotation, navigation, and stop controls."""
 
 import asyncio
 
@@ -6,9 +6,9 @@ from homeassistant.components.button import ButtonEntity
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_ENCODER_COUNTS_PER_TURN, DOMAIN
-from .entity import ScopeDomeEntity
-from .protocol import MovementBlocked, rotation_pulses
+from .const import CONF_ENCODER_COUNTS_PER_TURN, CONF_PARK_AZIMUTH, DOMAIN
+from .entity import ScopeDomeEntity, calibrated_azimuth
+from .protocol import MovementBlocked, azimuth_rotation, rotation_pulses
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -24,14 +24,17 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ScopeDomeRotate(entry, coordinator, "CW", "Rotate dome right", "mdi:rotate-right"),
         ScopeDomeRotate(entry, coordinator, "CCW", "Rotate dome left", "mdi:rotate-left"),
         ScopeDomeStopDome(entry, coordinator),
+        ScopeDomeNavigate(entry, coordinator, "find_home", "Find home", "mdi:home-search"),
+        ScopeDomeNavigate(entry, coordinator, "go_to_park", "Go to park", "mdi:parking"),
+        ScopeDomeNavigate(entry, coordinator, "go_to_azimuth", "Go to azimuth", "mdi:compass"),
     ])
 
 
 class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
     """Move by the angle selected on the device's number control."""
 
-    def __init__(self, entry, coordinator, direction, name, icon) -> None:
-        super().__init__(entry, coordinator, f"rotate_{direction.lower()}")
+    def __init__(self, entry, coordinator, direction, name, icon, *, key=None) -> None:
+        super().__init__(entry, coordinator, key or f"rotate_{direction.lower()}")
         self._direction = direction
         self._manual_span = entry.options.get(CONF_ENCODER_COUNTS_PER_TURN)
         self._attr_name = name
@@ -39,16 +42,20 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
 
     @property
     def available(self) -> bool:
-        return super().available and self._valid_step
+        return super().available and self._ready
 
     @property
-    def _valid_step(self) -> bool:
+    def _ready(self) -> bool:
         span = self.coordinator.data.rotation_span(self._manual_span)
         return rotation_pulses(self.coordinator.rotation_angle, span) is not None
 
+    @property
+    def _selected_value(self):
+        return self.coordinator.rotation_angle
+
     async def async_press(self) -> None:
         generation = self.coordinator.dome_stop_generation
-        angle = self.coordinator.rotation_angle
+        angle = self._selected_value
         async with self.coordinator.movement_lock:
             if generation != self.coordinator.dome_stop_generation:
                 return
@@ -76,6 +83,20 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
         span = self.coordinator.data.rotation_span(self._manual_span)
         if rotation_pulses(angle, span) is None:
             raise HomeAssistantError("Choose a valid rotation angle and encoder calibration")
+        await self._stop_if_moving()
+        if generation != self.coordinator.dome_stop_generation:
+            return
+        span = self.coordinator.data.rotation_span(self._manual_span)
+        pulses = rotation_pulses(angle, span)
+        if pulses is None:
+            raise HomeAssistantError("Encoder calibration is unavailable")
+        # Recheck all card interlocks after confirming a stop.
+        self.coordinator.data.validate_dome_command(self._direction)
+        await self.coordinator.client.command(f"moveDome={self._direction}:{pulses}")
+        await self.coordinator.async_request_refresh()
+
+    async def _stop_if_moving(self):
+        """Share stop confirmation between relative moves and navigation."""
         if self.coordinator.data.dome_motion != "stopped":
             await self.coordinator.client.command("stopDome")
             try:
@@ -89,15 +110,58 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
                 raise HomeAssistantError(
                     "Dome did not report stopped; new rotation was not sent"
                 ) from exc
+
+
+class ScopeDomeNavigate(ScopeDomeRotate):
+    """Find Home with the card, or convert a configured azimuth to a relative move."""
+
+    def __init__(self, entry, coordinator, operation, name, icon) -> None:
+        super().__init__(entry, coordinator, "CW", name, icon, key=operation)
+        self._operation = operation
+        self._options = entry.options
+
+    @property
+    def _selected_value(self):
+        if self._operation == "go_to_park":
+            return self._options.get(CONF_PARK_AZIMUTH)
+        if self._operation == "go_to_azimuth":
+            return self.coordinator.target_azimuth
+        return None
+
+    def _plan(self, target):
+        if self._operation == "go_to_park" and target is None:
+            raise MovementBlocked("Configure Dome park azimuth before Go to park")
+        data = self.coordinator.data
+        return azimuth_rotation(calibrated_azimuth(data, self._options), target,
+                                data.rotation_span(self._manual_span))
+
+    @property
+    def _ready(self) -> bool:
+        if self._operation == "find_home":
+            return True
+        try:
+            self._plan(self._selected_value)
+        except MovementBlocked:
+            return False
+        return True
+
+    async def _rotate(self, target, generation):
+        await self._refresh()
+        if self._operation != "find_home":
+            self._plan(target)
+        await self._stop_if_moving()
         if generation != self.coordinator.dome_stop_generation:
             return
-        span = self.coordinator.data.rotation_span(self._manual_span)
-        pulses = rotation_pulses(angle, span)
-        if pulses is None:
-            raise HomeAssistantError("Encoder calibration is unavailable")
-        # Recheck all card interlocks after confirming a stop.
-        self.coordinator.data.validate_dome_command(self._direction)
-        await self.coordinator.client.command(f"moveDome={self._direction}:{pulses}")
+        if self._operation == "find_home":
+            self.coordinator.data.validate_dome_command("CW")
+            await self.coordinator.client.command("findHome")
+        else:
+            plan = self._plan(target)
+            if plan is None:
+                return
+            direction, pulses = plan
+            self.coordinator.data.validate_dome_command(direction)
+            await self.coordinator.client.command(f"moveDome={direction}:{pulses}")
         await self.coordinator.async_request_refresh()
 
 

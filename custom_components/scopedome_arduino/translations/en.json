@@ -36,7 +36,8 @@
         "description": "Check the shutter limits and dome Home switch in the ScopeDome driver's Shutters and Sensors tabs at known physical positions. Select each active input value only after verifying it. Set the desired angle on the device's Dome rotation angle control before pressing Left or Right. Encoder pulses per turn are read automatically from the card.",
         "data": {
           "sensor_active_level": "Shutter limit active input (unknown, 0 or 1)",
-          "home_active_level": "Dome Home switch active input (unknown, 0 or 1)"
+          "home_active_level": "Dome Home switch active input (unknown, 0 or 1)",
+          "rain_active_level": "Rain detected input (0 for ScopeDome sensor, 1 if inverted)"
         }
       },
       "azimuth": {

@@ -168,9 +168,12 @@ class ProtocolTests(unittest.TestCase):
                     self.assertEqual(data.motion_block_reason, expected)
                     self.assertFalse(data.motion_safe)
                     for direction in ("CW", "CCW"):
-                        with self.assertRaises(protocol.MovementBlocked) as raised:
-                            data.validate_dome_command(direction)
-                        self.assertEqual(str(raised.exception), expected)
+                        if code == 3:
+                            self.assertTrue(data.validate_dome_command(direction))
+                        else:
+                            with self.assertRaises(protocol.MovementBlocked) as raised:
+                                data.validate_dome_command(direction)
+                            self.assertEqual(str(raised.exception), expected)
                     for direction in ("OPEN", "CLOSE"):
                         with self.assertRaises(protocol.MovementBlocked) as raised:
                             data.validate_shutter_command(direction, 0)
@@ -187,6 +190,22 @@ class ProtocolTests(unittest.TestCase):
         with self.assertRaisesRegex(protocol.MovementBlocked, "Shutter card is offline"):
             offline.validate_dome_command("CW")
         self.assertIsNone(protocol.parse_status(status()).motion_block_reason)
+
+    def test_cloud_alarm_does_not_override_other_rotation_interlocks(self):
+        for unsafe in (
+            status(master=card(emergency="3"), flags="0:0:0:0"),
+            status(master=card(emergency="3"), flags="1:1:0:0"),
+            status(master=card(emergency="3"), flags="1:0:0:1"),
+            status(master=card(emergency="3", relays="1:1:0:0:0:0:0:0:0")),
+            status(master=card(emergency="3"), slave=card(emergency="1")),
+            status(master=card(emergency="2"), slave=card(emergency="3")),
+            status(master=card(emergency="3"), slave=card(emergency="99")),
+        ):
+            with self.subTest(unsafe=unsafe):
+                data = protocol.parse_status(unsafe)
+                for direction in ("CW", "CCW"):
+                    with self.assertRaises(protocol.MovementBlocked):
+                        data.validate_dome_command(direction)
 
     def test_motor_relays_report_direction_and_fault(self):
         moving = protocol.parse_status(status(master=card(relays="1:0:0:0:0.5:0:0:0:0"),
@@ -244,7 +263,7 @@ class ProtocolTests(unittest.TestCase):
             moving.validate_dome_command("CCW")
         for unsafe in (
             protocol.parse_status(status(master=card(emergency="1"))),
-            protocol.parse_status(status(slave=card(emergency="3"))),
+            protocol.parse_status(status(slave=card(emergency="2"))),
             protocol.parse_status(status(flags="0:0:0:0")),
             protocol.parse_status(status(flags="1:1:0:0")),
             protocol.parse_status(status(master=card(
@@ -277,6 +296,23 @@ class ProtocolTests(unittest.TestCase):
     def test_wrong_command_acknowledgement_is_rejected(self):
         with self.assertRaises(protocol.ProtocolError):
             protocol.response_payload("getMac", "getMode|OK|master")
+
+    def test_azimuth_navigation_uses_shortest_path_and_wraps_north(self):
+        for current, target, expected in (
+            (350, 10, ("CW", 180)), (10, 350, ("CCW", 180)),
+            (350, 0, ("CW", 90)), (350, 360, ("CW", 90)),
+            (0, 180, ("CCW", 1620)), (0, 0, None), (0, 360, None),
+            (279 + 33 / 60 + 20 / 3600, 220.33, ("CCW", 533)),
+        ):
+            with self.subTest(current=current, target=target):
+                self.assertEqual(protocol.azimuth_rotation(current, target, 3240), expected)
+        self.assertEqual(protocol.azimuth_rotation(0, 180, 1000000), ("CCW", 500000))
+        for current, target, span in ((None, 90, 3240), (0, None, 3240),
+                                      (0, -1, 3240), (0, 361, 3240),
+                                      (0, float("nan"), 3240), (0, 90, None)):
+            with self.subTest(current=current, target=target, span=span):
+                with self.assertRaises(protocol.MovementBlocked):
+                    protocol.azimuth_rotation(current, target, span)
 
 
 if __name__ == "__main__":

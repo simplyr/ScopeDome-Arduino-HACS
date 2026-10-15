@@ -9,7 +9,9 @@ from time import monotonic
 from aiohttp import BasicAuth, ClientError, ClientSession, ClientTimeout
 
 from .const import HTTP_TIMEOUT
-from .protocol import DomeStatus, ProtocolError, parse_status, response_payload
+from .protocol import (
+    MAX_DOME_COMMAND_PULSES, DomeStatus, ProtocolError, parse_status, response_payload,
+)
 
 _LOGGER = logging.getLogger(__name__)
 CALIBRATION_REFRESH_SECONDS = 300
@@ -114,10 +116,10 @@ class ScopeDomeClient:
     async def command(self, name: str) -> None:
         """Send only documented movements with bounded dome rotation."""
         if name not in {
-            "moveShutter=OPEN", "moveShutter=CLOSE", "stopShutter", "stopDome"
+            "moveShutter=OPEN", "moveShutter=CLOSE", "stopShutter", "stopDome", "findHome"
         } and not (
-            (match := re.fullmatch(r"moveDome=(CW|CCW):([1-9][0-9]{0,3})", name))
-            and int(match.group(2)) <= 5000
+            (match := re.fullmatch(r"moveDome=(CW|CCW):([1-9][0-9]{0,5})", name))
+            and int(match.group(2)) <= MAX_DOME_COMMAND_PULSES
         ):
             raise ValueError("Unsupported card command")
         answer = (await self._request(name)).strip()

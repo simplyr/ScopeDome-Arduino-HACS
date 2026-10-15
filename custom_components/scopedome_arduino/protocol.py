@@ -16,6 +16,10 @@ class MovementBlocked(ValueError):
     """Current status does not permit the requested movement."""
 
 
+# The shortest GoTo path is at most half the supported 1,000,000-pulse span.
+MAX_DOME_COMMAND_PULSES = 500000
+
+
 EMERGENCY_REASONS = {
     0: "No alarm",
     1: "Digital input alarm",
@@ -56,6 +60,23 @@ def rotation_pulses(degrees: float, span: int | None) -> int | None:
         return None
     pulses = min(round(degrees * span / 360), span // 36)
     return pulses if 1 <= pulses <= 5000 else None
+
+
+def azimuth_rotation(current: float | None, target: float | None,
+                     span: int | None) -> tuple[str, int] | None:
+    """Plan the shortest relative rotation to an absolute azimuth."""
+    if (current is None or not isfinite(current) or not span or not 1 <= span <= 1000000):
+        raise MovementBlocked("Configure dome azimuth and encoder calibration before GoTo")
+    if (not isinstance(target, (int, float)) or isinstance(target, bool)
+            or not isfinite(target) or not 0 <= target <= 360):
+        raise MovementBlocked("Choose a target azimuth from 0 to 360 degrees")
+    delta = ((target % 360) - current + 180) % 360 - 180
+    pulses = round(abs(delta) * span / 360)
+    if pulses == 0:
+        return None
+    if not 1 <= pulses <= MAX_DOME_COMMAND_PULSES:
+        raise MovementBlocked("Requested GoTo exceeds the supported encoder step")
+    return ("CW" if delta > 0 else "CCW"), pulses
 
 
 def response_payload(command: str, body: str) -> str:
@@ -230,13 +251,21 @@ class DomeStatus:
     @property
     def motion_block_reason(self) -> str | None:
         """Identify every current communication or emergency movement interlock."""
+        return self._motion_block_reason(allowed_emergencies=(0,))
+
+    @property
+    def dome_rotation_block_reason(self) -> str | None:
+        """Cloud emergency requests shutter closure, not a dome rotation stop."""
+        return self._motion_block_reason(allowed_emergencies=(0, 3))
+
+    def _motion_block_reason(self, *, allowed_emergencies: tuple[int, ...]) -> str | None:
         reasons = []
         if not self.slave_online:
             reasons.append("Shutter card is offline")
-        if self.master.emergency != 0:
+        if self.master.emergency not in allowed_emergencies:
             code = self.master.emergency
             reasons.append(f"Dome safety alarm: {emergency_reason(code)} (code {code})")
-        if self.slave_online and self.slave.emergency != 0:
+        if self.slave_online and self.slave.emergency not in allowed_emergencies:
             code = self.slave.emergency
             reasons.append(f"Shutter safety alarm: {emergency_reason(code)} (code {code})")
         return "; ".join(reasons) or None
@@ -270,7 +299,7 @@ class DomeStatus:
         """Allow only a new, safe rotation direction from a fresh status."""
         if direction not in ("CW", "CCW"):
             raise MovementBlocked("Unknown dome direction")
-        if reason := self.motion_block_reason:
+        if reason := self.dome_rotation_block_reason:
             raise MovementBlocked(reason)
         if self.finding_home:
             raise MovementBlocked("Dome is finding Home")

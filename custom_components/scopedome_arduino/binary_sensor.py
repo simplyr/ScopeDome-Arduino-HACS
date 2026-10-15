@@ -1,10 +1,12 @@
-"""Safety flags and raw inputs, with interpreted Home only when configured."""
+"""Safety flags, interpreted states, and raw inputs."""
 
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers import entity_registry as er
 
-from .const import CONF_HOME_ACTIVE_LEVEL, CONF_PARK_AZIMUTH, DOMAIN, UNKNOWN_LEVEL
+from .const import (
+    CONF_HOME_ACTIVE_LEVEL, CONF_PARK_AZIMUTH, CONF_RAIN_ACTIVE_LEVEL, DOMAIN, UNKNOWN_LEVEL,
+)
 from .entity import ScopeDomeEntity, calibrated_azimuth
 from .protocol import emergency_reason
 
@@ -62,6 +64,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
         ScopeDomeBinary(entry, coordinator, "shutter_rain_input", "Shutter rain input",
                          lambda s: bool(s.slave.digital[5]) if s.slave_online else None,
                          None, category=None),
+        ScopeDomeRainDetected(entry, coordinator),
         ScopeDomeBinary(entry, coordinator, "shutter_cloud_input", "Shutter cloud input",
                          lambda s: bool(s.slave.digital[6]) if s.slave_online else None,
                          None),
@@ -95,3 +98,25 @@ class ScopeDomeBinary(ScopeDomeEntity, BinarySensorEntity):
             return None
         value = getattr(data, self._alarm_source).emergency
         return {"alarm_code": value, "alarm_type": emergency_reason(value)}
+
+
+class ScopeDomeRainDetected(ScopeDomeBinary):
+    """Interpret the ScopeDome sensor's active LOW output as rain detected."""
+
+    _attr_icon = "mdi:weather-rainy"
+
+    def __init__(self, entry, coordinator) -> None:
+        self._active_level = int(entry.options.get(CONF_RAIN_ACTIVE_LEVEL, "0"))
+        super().__init__(
+            entry, coordinator, "rain_detected", "Rain detected",
+            lambda s: (s.slave.digital[5] == self._active_level) if s.slave_online else None,
+            None, category=None,
+        )
+
+    @property
+    def extra_state_attributes(self):
+        status = self.coordinator.data
+        return {
+            "raw_input": status.slave.digital[5] if status.slave_online else None,
+            "active_level": self._active_level,
+        }
