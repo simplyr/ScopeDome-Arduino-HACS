@@ -159,6 +159,35 @@ class ProtocolTests(unittest.TestCase):
         emergency = protocol.parse_status(status(master=card(emergency="1")))
         self.assertFalse(emergency.motion_safe)
 
+    def test_movement_errors_identify_each_active_interlock(self):
+        for board, label in (("master", "Dome"), ("slave", "Shutter")):
+            for code in (1, 2, 3, 99):
+                with self.subTest(board=board, code=code):
+                    data = protocol.parse_status(status(**{board: card(emergency=str(code))}))
+                    expected = f"{label} safety alarm: {protocol.emergency_reason(code)} (code {code})"
+                    self.assertEqual(data.motion_block_reason, expected)
+                    self.assertFalse(data.motion_safe)
+                    for direction in ("CW", "CCW"):
+                        with self.assertRaises(protocol.MovementBlocked) as raised:
+                            data.validate_dome_command(direction)
+                        self.assertEqual(str(raised.exception), expected)
+                    for direction in ("OPEN", "CLOSE"):
+                        with self.assertRaises(protocol.MovementBlocked) as raised:
+                            data.validate_shutter_command(direction, 0)
+                        self.assertEqual(str(raised.exception), expected)
+
+    def test_offline_and_simultaneous_alarm_reasons_are_reported(self):
+        data = protocol.parse_status(status(master=card(emergency="3"),
+                                            slave=card(emergency="1")))
+        self.assertEqual(data.motion_block_reason,
+                         "Dome safety alarm: Cloud sensor alarm (code 3); "
+                         "Shutter safety alarm: Digital input alarm (code 1)")
+        offline = protocol.parse_status(status(slave=card(emergency="1"), flags="0:0:0:0"))
+        self.assertEqual(offline.motion_block_reason, "Shutter card is offline")
+        with self.assertRaisesRegex(protocol.MovementBlocked, "Shutter card is offline"):
+            offline.validate_dome_command("CW")
+        self.assertIsNone(protocol.parse_status(status()).motion_block_reason)
+
     def test_motor_relays_report_direction_and_fault(self):
         moving = protocol.parse_status(status(master=card(relays="1:0:0:0:0.5:0:0:0:0"),
                                               slave=card(relays="0:1:0:0:0.5:0:0:0:0")))

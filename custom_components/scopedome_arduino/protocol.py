@@ -225,7 +225,21 @@ class DomeStatus:
 
     @property
     def motion_safe(self) -> bool:
-        return self.slave_online and self.master.emergency == 0 and self.slave.emergency == 0
+        return self.motion_block_reason is None
+
+    @property
+    def motion_block_reason(self) -> str | None:
+        """Identify every current communication or emergency movement interlock."""
+        reasons = []
+        if not self.slave_online:
+            reasons.append("Shutter card is offline")
+        if self.master.emergency != 0:
+            code = self.master.emergency
+            reasons.append(f"Dome safety alarm: {emergency_reason(code)} (code {code})")
+        if self.slave_online and self.slave.emergency != 0:
+            code = self.slave.emergency
+            reasons.append(f"Shutter safety alarm: {emergency_reason(code)} (code {code})")
+        return "; ".join(reasons) or None
 
     def validate_shutter_command(self, direction: str, active_level: int | None) -> bool:
         """Return whether to send the command, or reject unsafe movement."""
@@ -233,8 +247,8 @@ class DomeStatus:
             raise MovementBlocked("Unknown shutter direction")
         if active_level not in (0, 1):
             raise MovementBlocked("Verify shutter contact active level in integration options")
-        if not self.motion_safe:
-            raise MovementBlocked("Slave offline or emergency active; movement blocked")
+        if reason := self.motion_block_reason:
+            raise MovementBlocked(reason)
         if self.calibrating:
             raise MovementBlocked("Dome encoder calibration is running")
         state = self.shutter_state(active_level)
@@ -256,8 +270,8 @@ class DomeStatus:
         """Allow only a new, safe rotation direction from a fresh status."""
         if direction not in ("CW", "CCW"):
             raise MovementBlocked("Unknown dome direction")
-        if not self.motion_safe:
-            raise MovementBlocked("Shutter card offline or a safety alarm is active")
+        if reason := self.motion_block_reason:
+            raise MovementBlocked(reason)
         if self.finding_home:
             raise MovementBlocked("Dome is finding Home")
         if self.calibrating:
