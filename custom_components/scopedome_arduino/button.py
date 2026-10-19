@@ -1,6 +1,7 @@
 """Dome rotation, navigation, and stop controls."""
 
 import asyncio
+import logging
 
 from homeassistant.components.button import ButtonEntity
 from homeassistant.exceptions import HomeAssistantError
@@ -9,6 +10,8 @@ from homeassistant.helpers import entity_registry as er
 from .const import CONF_ENCODER_COUNTS_PER_TURN, CONF_PARK_AZIMUTH, DOMAIN
 from .entity import ScopeDomeEntity, calibrated_azimuth
 from .protocol import MovementBlocked, azimuth_rotation, rotation_pulses
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -92,6 +95,12 @@ class ScopeDomeRotate(ScopeDomeEntity, ButtonEntity):
             raise HomeAssistantError("Encoder calibration is unavailable")
         # Recheck all card interlocks after confirming a stop.
         self.coordinator.data.validate_dome_command(self._direction)
+        _LOGGER.debug(
+            "Rotation request: angle_deg=%s span=%s span_source=%s raw_start=%s command=moveDome=%s:%s",
+            angle, span,
+            "card" if self.coordinator.data.calibrated_rotation else "manual_fallback",
+            self.coordinator.data.master.encoder, self._direction, pulses,
+        )
         await self.coordinator.client.command(f"moveDome={self._direction}:{pulses}")
         await self.coordinator.async_request_refresh()
 
@@ -154,6 +163,8 @@ class ScopeDomeNavigate(ScopeDomeRotate):
             return
         if self._operation == "find_home":
             self.coordinator.data.validate_dome_command("CW")
+            _LOGGER.debug("Navigation request: raw_start=%s command=findHome",
+                          self.coordinator.data.master.encoder)
             await self.coordinator.client.command("findHome")
         else:
             plan = self._plan(target)
@@ -161,6 +172,13 @@ class ScopeDomeNavigate(ScopeDomeRotate):
                 return
             direction, pulses = plan
             self.coordinator.data.validate_dome_command(direction)
+            _LOGGER.debug(
+                "Navigation request: operation=%s target_deg=%s current_deg=%s span=%s raw_start=%s command=moveDome=%s:%s",
+                self._operation, target,
+                calibrated_azimuth(self.coordinator.data, self._options),
+                self.coordinator.data.rotation_span(self._manual_span),
+                self.coordinator.data.master.encoder, direction, pulses,
+            )
             await self.coordinator.client.command(f"moveDome={direction}:{pulses}")
         await self.coordinator.async_request_refresh()
 

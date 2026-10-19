@@ -37,6 +37,10 @@ The paired card status exposes **dome and shutter motor temperatures**, **electr
 
 ## Safety alarms and troubleshooting
 
+### Rotation diagnostics (0.2.10)
+
+Enable debug logging on the integration before a supervised rotation, then disable it after the dome stops and download the log. Rotation diagnostics record the selected angle, effective encoder span and source, raw starting encoder count, exact movement command, and successful acknowledgement. Status diagnostics record raw encoder counts and motor state on each existing status read. No additional movement or polling is introduced. These samples can compare the requested pulses with the observed displacement, but do not measure the exact motor stopping time. Credentials and complete card responses are not logged. Update through HACS and restart Home Assistant before collecting the log.
+
 **Dome safety alarm** and **Shutter safety alarm** reflect the controller's emergency flags. The **Dome alarm source** and **Shutter alarm source** sensors explain the codes defined in the SDK: `0` = no alarm, `1` = digital input, `2` = analog input, `3` = cloud sensor. They cannot identify the exact physical sensor or rule. A Master emergency can be configured to monitor a Slave input, so simultaneous alarms do not necessarily mean two separate failures. Shutter actions remain blocked while an alarm is active.
 
 From version 0.2.8, a **cloud emergency (code 3) alone does not block manual dome rotation**. The manufacturer's weather emergency functions close the shutter ([driver manual, pages 23-24](https://www.scopedome.com/wp-content/uploads/2021/02/ScopeDome-Driver-Manual-5.5.5.19-ENG.pdf)). Cloud alarm indications remain visible, and the integration does not clear or reconfigure controller emergency rules. Dome rotation still requires fresh status, a connected Shutter card, valid encoder calibration, a selected angle, and no digital, analog, or unknown emergency codes. Home finding, calibration, and conflicting motor signals also block rotation. A rejected request is not sent to the card; a successful rotation with cloud code 3 no longer produces the previous action-error notification.

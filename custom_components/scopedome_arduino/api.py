@@ -92,6 +92,10 @@ class ScopeDomeClient:
             # The request lock is released during the delay so Stop can run.
             await asyncio.sleep(STATUS_RETRY_DELAY)
             status = parse_status(await self._request("getStatus"))
+        _LOGGER.debug(
+            "Card status: raw_encoder=%s dome_motion=%s finding_home=%s calibrating=%s",
+            status.master.encoder, status.dome_motion, status.finding_home, status.calibrating,
+        )
         if status.calibrating:
             self._calibrated_rotation = None
             self._next_calibration_read = 0.0
@@ -123,5 +127,7 @@ class ScopeDomeClient:
             and int(match.group(2)) <= MAX_DOME_COMMAND_PULSES
         ):
             raise ValueError("Unsupported card command")
+        _LOGGER.debug("Sending movement command: %s", name)
         answer = await self._request(name)
         validate_movement_acknowledgement(name, answer)
+        _LOGGER.debug("Movement command acknowledged: %s", name)
